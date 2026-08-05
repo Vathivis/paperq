@@ -231,6 +231,7 @@ jobs:
         run: |
           set -euo pipefail
           gh release create "$GITHUB_REF_NAME" release/* \
+            --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
             --generate-notes \
             --title "paperq $VERSION"
