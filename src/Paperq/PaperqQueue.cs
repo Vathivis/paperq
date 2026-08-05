@@ -117,7 +117,13 @@ internal sealed class PaperqQueue
                     using var claimHandle = TextFile.OpenRecordForClaim(record.FullPath);
                     if (File.Exists(destination))
                     {
-                        throw DuplicateRecord(record.Id);
+                        if (File.Exists(record.FullPath))
+                        {
+                            throw DuplicateRecord(record.Id);
+                        }
+
+                        // Linux allows concurrent opens before one claimant atomically moves the file.
+                        continue;
                     }
 
                     File.Move(record.FullPath, destination, overwrite: false);
