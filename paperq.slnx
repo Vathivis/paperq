@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="src/Paperq/Paperq.csproj" />
+  <Project Path="tests/Paperq.Tests/Paperq.Tests.csproj" />
+</Solution>
+
