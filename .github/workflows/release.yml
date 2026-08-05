@@ -63,12 +63,17 @@ jobs:
       contents: read
       id-token: write
       attestations: write
+      artifact-metadata: write
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: windows-2025
             rid: win-x64
+            executable: paperq.exe
+            archive: zip
+          - os: windows-11-arm
+            rid: win-arm64
             executable: paperq.exe
             archive: zip
           - os: ubuntu-24.04
@@ -93,7 +98,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install --yes clang zlib1g-dev
+          sudo apt-get install --yes clang dpkg-dev zlib1g-dev
 
       - name: Restore
         run: dotnet restore paperq.slnx
@@ -132,8 +137,7 @@ jobs:
             throw "Expected '$expected' but received '$actual'."
           }
 
-      - name: Package release asset
-        id: package
+      - name: Package release assets
         shell: pwsh
         run: |
           $version = "${{ needs.validate.outputs.version }}"
@@ -152,7 +156,7 @@ jobs:
             Compress-Archive -LiteralPath $stagedExecutable -DestinationPath (Join-Path $releaseDirectory $assetName)
           }
           else {
-            $assetName = "paperq-$version-$rid.tar.gz"
+            $tarAssetName = "paperq-$version-$rid.tar.gz"
             $stagedExecutable = Join-Path $stagingDirectory "paperq"
             Copy-Item -LiteralPath $source -Destination $stagedExecutable
             & chmod '+x' $stagedExecutable
@@ -160,24 +164,27 @@ jobs:
               throw "chmod failed with exit code $LASTEXITCODE."
             }
 
-            & tar '-C' $stagingDirectory '-czf' (Join-Path $releaseDirectory $assetName) 'paperq'
+            & tar '-C' $stagingDirectory '-czf' (Join-Path $releaseDirectory $tarAssetName) 'paperq'
             if ($LASTEXITCODE -ne 0) {
               throw "tar failed with exit code $LASTEXITCODE."
             }
+
+            & bash './eng/package-deb.sh' $source $rid $version $releaseDirectory
+            if ($LASTEXITCODE -ne 0) {
+              throw "Debian package creation failed with exit code $LASTEXITCODE."
+            }
           }
 
-          "asset-path=release/$assetName" >> $env:GITHUB_OUTPUT
-
-      - name: Attest release asset
+      - name: Attest release assets
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
-          subject-path: ${{ steps.package.outputs.asset-path }}
+          subject-path: release/*
 
-      - name: Upload release asset
+      - name: Upload release assets
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-${{ matrix.rid }}
-          path: ${{ steps.package.outputs.asset-path }}
+          path: release/*
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
@@ -193,6 +200,7 @@ jobs:
       contents: write
       id-token: write
       attestations: write
+      artifact-metadata: write
 
     steps:
       - name: Download release assets
@@ -205,10 +213,22 @@ jobs:
       - name: Generate checksums
         shell: pwsh
         run: |
-          $assets = @(Get-ChildItem -LiteralPath release -File | Where-Object Name -Like 'paperq-*' | Sort-Object Name)
-          if ($assets.Count -ne 3) {
-            throw "Expected three release archives but found $($assets.Count)."
+          $version = "${{ needs.validate.outputs.version }}"
+          $expectedNames = @(
+            "paperq-$version-linux-arm64.tar.gz"
+            "paperq-$version-linux-x64.tar.gz"
+            "paperq-$version-win-arm64.zip"
+            "paperq-$version-win-x64.zip"
+            "paperq_${version}_amd64.deb"
+            "paperq_${version}_arm64.deb"
+          )
+          $actualNames = @(Get-ChildItem -LiteralPath release -File | ForEach-Object Name | Sort-Object)
+          $difference = @(Compare-Object -ReferenceObject $expectedNames -DifferenceObject $actualNames)
+          if ($difference.Count -ne 0) {
+            throw "Release assets did not match the expected set. Found: $($actualNames -join ', ')"
           }
+
+          $assets = @($expectedNames | ForEach-Object { Get-Item -LiteralPath (Join-Path 'release' $_) })
 
           $lines = foreach ($asset in $assets) {
             $hash = (Get-FileHash -LiteralPath $asset.FullName -Algorithm SHA256).Hash.ToLowerInvariant()

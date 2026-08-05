@@ -5,10 +5,11 @@
 `.github/workflows/ci.yml` runs for pull requests, pushes to `main`, and manual dispatches. It uses matching hosted runners to build, run the executable test harness, produce each Native AOT target, and smoke-test its `--version` output:
 
 - Windows x64 on `windows-2025`
+- Windows ARM64 on `windows-11-arm`
 - Linux x64 on `ubuntu-24.04`
 - Linux ARM64 on `ubuntu-24.04-arm`
 
-The ARM64 hosted runner is currently a GitHub public-preview runner. `paperq` is a public repository, so the standard runner is available without adding a self-hosted machine.
+The Windows ARM64 hosted runner is currently in GitHub public preview. `paperq` is a public repository, so all four standard runners are available without adding self-hosted machines.
 
 ## Creating a release
 
@@ -26,17 +27,17 @@ git tag -a v0.1.0 -m "paperq 0.1.0"
 git push origin v0.1.0
 ```
 
-The release workflow rebuilds and tests on all three architectures. It publishes only the executable, creates a ZIP for Windows and `tar.gz` archives for Linux, generates `SHA256SUMS`, creates GitHub artifact attestations, and creates the GitHub Release. It fails rather than replacing an existing release.
+The release workflow rebuilds and tests all four runtime targets. It creates x64 and ARM64 ZIPs for Windows, plus `tar.gz` and `.deb` packages for both Linux architectures, generates `SHA256SUMS`, creates GitHub artifact attestations, and creates the GitHub Release. It fails rather than replacing an existing release.
 
 No workflow submits anything to the WinGet community repository. Submission remains a reviewed, manual step after testing the exact release asset in Windows Sandbox.
 
 ## Verifying a release
 
-Verify the checksums after downloading all four files from a release:
+Verify the checksums after downloading all seven files from a release:
 
 ```powershell
 $expected = Get-Content .\SHA256SUMS
-Get-FileHash .\paperq-*.zip, .\paperq-*.tar.gz -Algorithm SHA256
+Get-FileHash .\paperq-*.zip, .\paperq-*.tar.gz, .\paperq_*.deb -Algorithm SHA256
 ```
 
 GitHub's cryptographic build-provenance attestation can also be verified with the GitHub CLI:
@@ -80,9 +81,9 @@ The provider-specific action and identity settings are intentionally not present
 After the first release succeeds:
 
 1. choose the final WinGet `PackageIdentifier` and add an explicit repository license;
-2. use the immutable GitHub Release URL for the Windows ZIP;
-3. declare the ZIP's nested portable executable as `paperq.exe`;
-4. set `InstallerSha256` from the published archive;
+2. use the immutable GitHub Release URLs for the Windows x64 and ARM64 ZIPs;
+3. add one portable installer entry per architecture and declare each ZIP's nested executable as `paperq.exe`;
+4. set each `InstallerSha256` from its published archive;
 5. validate the manifest and test installation, upgrade, invocation, and uninstall in Windows Sandbox;
 6. submit the reviewed manifest to `microsoft/winget-pkgs`.
 

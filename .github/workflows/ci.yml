@@ -31,6 +31,10 @@ jobs:
             os: windows-2025
             rid: win-x64
             executable: paperq.exe
+          - name: Windows ARM64
+            os: windows-11-arm
+            rid: win-arm64
+            executable: paperq.exe
           - name: Linux x64
             os: ubuntu-24.04
             rid: linux-x64
@@ -53,7 +57,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install --yes clang zlib1g-dev
+          sudo apt-get install --yes clang dpkg-dev zlib1g-dev
 
       - name: Restore
         run: dotnet restore paperq.slnx
@@ -89,3 +93,33 @@ jobs:
           if ($actual -ne $expected) {
             throw "Expected '$expected' but received '$actual'."
           }
+
+      - name: Build and smoke-test Debian package
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version="$(dotnet msbuild src/Paperq/Paperq.csproj --nologo -getProperty:Version)"
+          package_directory="$RUNNER_TEMP/paperq-deb-${{ matrix.rid }}"
+          extract_directory="$RUNNER_TEMP/paperq-deb-extract-${{ matrix.rid }}"
+
+          bash eng/package-deb.sh \
+            "artifacts/${{ matrix.rid }}/paperq" \
+            "${{ matrix.rid }}" \
+            "$version" \
+            "$package_directory"
+
+          shopt -s nullglob
+          packages=("$package_directory"/paperq_"$version"_*.deb)
+          if [[ ${#packages[@]} -ne 1 ]]; then
+            echo "Expected one Debian package but found ${#packages[@]}." >&2
+            exit 1
+          fi
+
+          dpkg-deb --extract "${packages[0]}" "$extract_directory"
+          actual="$("$extract_directory/usr/bin/paperq" --version)"
+          if [[ "$actual" != "paperq $version" ]]; then
+            echo "Expected 'paperq $version' but received '$actual'." >&2
+            exit 1
+          fi
