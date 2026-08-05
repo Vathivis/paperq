@@ -5,7 +5,8 @@ namespace Paperq;
 
 internal static class CliApplication
 {
-    internal const string ProductVersion = "0.1.0";
+    internal static string ProductVersion { get; } =
+        typeof(CliApplication).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
 
     internal static int Run(IReadOnlyList<string> arguments, CliIo io)
     {

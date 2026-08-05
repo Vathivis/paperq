@@ -132,3 +132,16 @@ dotnet publish src/Paperq/Paperq.csproj --configuration Release --runtime linux-
 ```
 
 Cross-operating-system Native AOT publishing is not supported. The Windows binary must be produced on Windows; the Linux binaries must be produced on Linux with the appropriate native toolchain.
+
+## CI and releases
+
+Pull requests and pushes to `main` build, run the executable test harness, publish Native AOT, and smoke-test all three supported runtime identifiers on matching GitHub-hosted runners.
+
+Pushing a tag whose value matches the project version, such as `v0.1.0`, creates a GitHub Release containing:
+
+- `paperq-<version>-win-x64.zip`
+- `paperq-<version>-linux-x64.tar.gz`
+- `paperq-<version>-linux-arm64.tar.gz`
+- `SHA256SUMS`
+
+Release assets also receive GitHub artifact attestations. The workflow does not submit to WinGet and does not currently Authenticode-sign the Windows executable. See [Releasing and signing](docs/releasing.md) for the release procedure, provenance verification, WinGet requirements, and signing options.
