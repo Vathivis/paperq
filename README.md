@@ -58,6 +58,20 @@ Without `--root`, `paperq` walks upward from the current directory to find the n
 
 When input or output is redirected, or `--json` is used, `init` does not prompt and does not modify `AGENTS.md` or `.gitignore`. Automation can request those changes explicitly with `--append-agents` and `--gitignore`. Both edits are idempotent, and `--gitignore` is rejected outside a Git repository.
 
+### Copy-ready `AGENTS.md` instructions
+
+Paste this block into the repository's root `AGENTS.md`, or let `paperq init` add it for you:
+
+```markdown
+<!-- paperq:agent-instructions:start -->
+## Papercuts
+
+During normal work, record small, non-blocking friction with `paperq add "<concise message>"` or `paperq add --stdin`, then continue the main task. Examples include dead-end tool calls, broken links, flaky commands, stale caches, confusing errors, and undocumented setup.
+
+Keep each papercut to one or two sentences. Include a suspected cause or fix only when useful. Never log secrets, credentials, full transcripts, or large raw output.
+<!-- paperq:agent-instructions:end -->
+```
+
 ## Record format
 
 IDs contain a sortable UTC timestamp plus random entropy:
