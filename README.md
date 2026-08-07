@@ -9,8 +9,6 @@ The project targets .NET 10 and publishes as Native AOT executables for:
 - `linux-x64`
 - `linux-arm64`
 
-Native AOT keeps each release standalone without bundling a conventional self-contained .NET deployment or requiring a .NET runtime on the target machine.
-
 ## Queue layout
 
 ```text
