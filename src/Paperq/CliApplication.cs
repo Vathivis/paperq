@@ -73,9 +73,13 @@ internal static class CliApplication
 
         initializer.CreateQueue();
 
-        var agentsAlreadyPresent = initializer.HasAgentInstructions();
+        var agentInstructionsAlreadyPresent = initializer.HasAgentInstructions();
+        var resolutionReferenceAlreadyPresent = initializer.HasResolutionReference();
+        var managedAgentContentAlreadyPresent =
+            agentInstructionsAlreadyPresent && resolutionReferenceAlreadyPresent;
         var gitIgnoreAlreadyPresent = initializer.HasGitIgnoreRule();
-        var agentsChanged = false;
+        var agentInstructionsChanged = false;
+        var resolutionReferenceChanged = false;
         var gitIgnoreChanged = false;
 
         if (!json)
@@ -84,20 +88,22 @@ internal static class CliApplication
             io.Output.WriteLine();
             io.Output.WriteLine("Paste-ready AGENTS.md instructions:");
             io.Output.WriteLine();
-            io.Output.WriteLine(QueueInitializer.AgentInstructions);
+            io.Output.WriteLine(QueueInitializer.CopyReadyInstructions);
             io.Output.WriteLine();
         }
 
         if (command.AppendAgents)
         {
-            agentsChanged = initializer.AppendAgentInstructions();
+            (agentInstructionsChanged, resolutionReferenceChanged) =
+                initializer.AppendManagedAgentInstructions();
         }
-        else if (!agentsAlreadyPresent && !json && io.IsInteractive)
+        else if (!managedAgentContentAlreadyPresent && !json && io.IsInteractive)
         {
             var action = File.Exists(initializer.AgentsPath) ? "Append to" : "Create";
             if (PromptYesNo(io, $"{action} {initializer.AgentsPath}?"))
             {
-                agentsChanged = initializer.AppendAgentInstructions();
+                (agentInstructionsChanged, resolutionReferenceChanged) =
+                    initializer.AppendManagedAgentInstructions();
             }
         }
 
@@ -114,7 +120,9 @@ internal static class CliApplication
             }
         }
 
-        var agentsPresent = agentsAlreadyPresent || agentsChanged;
+        var agentsPresent = initializer.HasAgentInstructions();
+        var resolutionReferencePresent = initializer.HasResolutionReference();
+        var agentsChanged = agentInstructionsChanged || resolutionReferenceChanged;
         var gitIgnorePresent = gitIgnoreAlreadyPresent || gitIgnoreChanged;
         if (json)
         {
@@ -126,15 +134,17 @@ internal static class CliApplication
                 writer.WriteString("agentsPath", initializer.AgentsPath);
                 writer.WriteBoolean("agentsPresent", agentsPresent);
                 writer.WriteBoolean("agentsChanged", agentsChanged);
+                writer.WriteBoolean("resolutionReferencePresent", resolutionReferencePresent);
+                writer.WriteBoolean("resolutionReferenceChanged", resolutionReferenceChanged);
                 writer.WriteString("gitIgnorePath", project.IsGitRepository ? initializer.GitIgnorePath : null);
                 writer.WriteBoolean("gitIgnorePresent", gitIgnorePresent);
                 writer.WriteBoolean("gitIgnoreChanged", gitIgnoreChanged);
-                writer.WriteString("agentInstructions", QueueInitializer.AgentInstructions);
+                writer.WriteString("agentInstructions", QueueInitializer.CopyReadyInstructions);
             }));
         }
         else
         {
-            io.Output.WriteLine(agentsPresent
+            io.Output.WriteLine(agentsPresent && resolutionReferencePresent
                 ? $"AGENTS.md instructions present: {initializer.AgentsPath}"
                 : "AGENTS.md was not changed. Re-run with --append-agents to add the instructions non-interactively.");
 
@@ -234,7 +244,18 @@ internal static class CliApplication
     {
         var queue = CreateQueue(project);
         var record = queue.Resolve(command.Id, command.Note);
-        return WriteTransitionResult(io, json, "resolve", "Resolved", record, queue.Layout);
+        if (json)
+        {
+            WriteRecordSuccess(io, "resolve", record, queue.Layout, writer =>
+                writer.WriteString("resolutionPath", queue.Layout.ResolutionJournalRelativePath));
+        }
+        else
+        {
+            io.Output.WriteLine($"Resolved {record.Id} at {queue.Layout.RelativePath(record.State, record.Id)}");
+            io.Output.WriteLine($"Resolution journal: {queue.Layout.ResolutionJournalRelativePath}");
+        }
+
+        return (int)PaperqExitCode.Success;
     }
 
     private static int ExecuteBlock(ProjectContext project, BlockCommand command, bool json, CliIo io)
@@ -408,7 +429,8 @@ internal static class CliApplication
             Usage: paperq init [--append-agents] [--gitignore]
 
             Creates .papercuts/open, working, blocked, and resolved. Interactive use
-            offers to create or append AGENTS.md and, inside Git, update .gitignore.
+            offers to add PaperQ instructions plus a one-line resolution-journal reference
+            to AGENTS.md and, inside Git, update .gitignore.
             Non-interactive use changes those files only when the explicit flags are set.
             """,
         "add" => """
@@ -426,7 +448,12 @@ internal static class CliApplication
 
             Selects the oldest open record. --claim atomically moves it to working.
             """,
-        "resolve" => "Usage: paperq resolve <id> --note <text>",
+        "resolve" => """
+            Usage: paperq resolve <id> --note <text>
+
+            Moves a working papercut to resolved and adds its problem and solution to
+            PAPERQ_RESOLUTIONS.md for future agents.
+            """,
         "block" => "Usage: paperq block <id> --reason <text>",
         "reopen" => "Usage: paperq reopen <id>",
         _ => throw PaperqException.Usage($"Unknown help topic: {topic}"),

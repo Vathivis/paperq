@@ -11,6 +11,7 @@ internal static class TestSuite
         ("root discovery and exact override", RootDiscoveryAndOverride),
         ("non-interactive init is conservative", NonInteractiveInitIsConservative),
         ("interactive init updates files idempotently", InteractiveInitIsIdempotent),
+        ("init migrates legacy AGENTS without changing custom instructions", InitMigratesLegacyAgents),
         ("gitignore flag requires Git", GitIgnoreRequiresGit),
         ("add and JSON list preserve Markdown", AddAndList),
         ("input safety limits", InputSafetyLimits),
@@ -18,6 +19,10 @@ internal static class TestSuite
         ("concurrent claims are unique", ConcurrentClaimsAreUnique),
         ("concurrent lifecycle transitions have one winner", ConcurrentLifecycleTransitionsHaveOneWinner),
         ("block, reopen, and resolve lifecycle", LifecycleTransitions),
+        ("resolution journal retries are idempotent", ResolutionJournalRetriesAreIdempotent),
+        ("concurrent resolutions share one journal", ConcurrentResolutionsShareOneJournal),
+        ("existing non-paperq resolution document is preserved", ExistingResolutionDocumentIsPreserved),
+        ("resolve JSON identifies the resolution journal", ResolveJsonIdentifiesJournal),
         ("duplicate states are rejected", DuplicateStatesAreRejected),
         ("JSON errors stay on stdout", JsonErrorsStayOnStdout),
     ];
@@ -84,6 +89,7 @@ internal static class TestSuite
 
         Assert.False(File.Exists(Path.Combine(directory.Path, "AGENTS.md")));
         Assert.False(File.Exists(Path.Combine(directory.Path, ".gitignore")));
+        Assert.False(File.Exists(Path.Combine(directory.Path, QueueLayout.ResolutionJournalFileName)));
 
         var jsonResult = RunCli(directory.Path, ["init", "--json"]);
         Assert.Equal(0, jsonResult.ExitCode);
@@ -91,6 +97,8 @@ internal static class TestSuite
         Assert.Equal(1, document.RootElement.GetProperty("schemaVersion").GetInt32());
         Assert.True(document.RootElement.GetProperty("ok").GetBoolean());
         Assert.False(document.RootElement.GetProperty("data").GetProperty("agentsChanged").GetBoolean());
+        Assert.False(document.RootElement.GetProperty("data").GetProperty("resolutionReferencePresent").GetBoolean());
+        Assert.False(document.RootElement.GetProperty("data").GetProperty("resolutionReferenceChanged").GetBoolean());
     }
 
     private static void InteractiveInitIsIdempotent()
@@ -104,12 +112,32 @@ internal static class TestSuite
         Assert.True(File.Exists(agentsPath));
         Assert.True(File.Exists(ignorePath));
         Assert.Contains(QueueInitializer.AgentsStartMarker, File.ReadAllText(agentsPath));
+        Assert.Contains(QueueInitializer.ResolutionReferenceStartMarker, File.ReadAllText(agentsPath));
         Assert.Contains(QueueInitializer.GitIgnoreRule, File.ReadAllText(ignorePath));
 
         var second = RunCli(directory.Path, ["init", "--append-agents", "--gitignore"]);
         Assert.Equal(0, second.ExitCode);
         Assert.Equal(1, CountOccurrences(File.ReadAllText(agentsPath), QueueInitializer.AgentsStartMarker));
+        Assert.Equal(1, CountOccurrences(File.ReadAllText(agentsPath), QueueInitializer.ResolutionReferenceStartMarker));
         Assert.Equal(1, CountOccurrences(File.ReadAllText(ignorePath), QueueInitializer.GitIgnoreRule));
+    }
+
+    private static void InitMigratesLegacyAgents()
+    {
+        using var directory = new TestDirectory(git: true);
+        var agentsPath = Path.Combine(directory.Path, "AGENTS.md");
+        var customText = "# Project instructions\n\nKeep this custom guidance.\n";
+        File.WriteAllText(agentsPath, customText + "\n" + QueueInitializer.AgentInstructions + "\n");
+
+        var result = RunCli(directory.Path, ["init", "--append-agents"]);
+        Assert.Equal(0, result.ExitCode);
+
+        var actual = File.ReadAllText(agentsPath);
+        Assert.True(actual.StartsWith(customText, StringComparison.Ordinal));
+        Assert.Contains("Keep this custom guidance.", actual);
+        Assert.Contains("PAPERQ_RESOLUTIONS.md", actual);
+        Assert.Equal(1, CountOccurrences(actual, QueueInitializer.AgentsStartMarker));
+        Assert.Equal(1, CountOccurrences(actual, QueueInitializer.ResolutionReferenceStartMarker));
     }
 
     private static void GitIgnoreRequiresGit()
@@ -246,6 +274,16 @@ internal static class TestSuite
         Assert.Contains("### Reopened", history);
         Assert.Contains("### Resolved\n\nCleared and documented", history);
 
+        var journalPath = queue.Layout.ResolutionJournalPath;
+        Assert.True(File.Exists(journalPath));
+        var journal = File.ReadAllText(journalPath);
+        Assert.Contains(ResolutionJournal.HeaderMarker, journal);
+        Assert.Contains(ResolutionJournal.EntryMarker(added.Id, "Cleared and documented the cache."), journal);
+        Assert.Contains("### Problem\n\nThe cache is stale.", journal);
+        Assert.Contains("### Resolution\n\nCleared and documented the cache.", journal);
+        Assert.Contains(queue.Layout.RelativePath(QueueState.Resolved, added.Id), journal);
+        Assert.False(File.Exists(Path.Combine(directory.Path, "AGENTS.md")));
+
         Assert.Equal(0, queue.List(includeResolved: false).Count);
         Assert.Equal(1, queue.List(includeResolved: true).Count);
     }
@@ -277,6 +315,117 @@ internal static class TestSuite
         var current = queue.List(includeResolved: true).Single();
         Assert.True(current.State is QueueState.Resolved or QueueState.Blocked);
         Assert.Equal(0, Directory.GetFiles(queue.Layout.StateDirectory(QueueState.Working), "*.md").Length);
+        if (current.State == QueueState.Resolved)
+        {
+            var journal = File.ReadAllText(queue.Layout.ResolutionJournalPath);
+            Assert.Equal(1, CountOccurrences(journal, ResolutionJournal.EntryMarker(record.Id, "resolved evidence")));
+        }
+        else
+        {
+            Assert.False(File.Exists(queue.Layout.ResolutionJournalPath));
+        }
+    }
+
+    private static void ResolutionJournalRetriesAreIdempotent()
+    {
+        using var directory = new TestDirectory();
+        new QueueLayout(directory.Path).Create();
+        var queue = new PaperqQueue(directory.Path);
+        var record = queue.Add("SSH needs the project identity and proxy jump options.");
+        queue.Next(claim: true);
+
+        var first = queue.Resolve(record.Id, "Added a project SSH wrapper and documented its use.");
+        var retry = queue.Resolve(record.Id, "Added a project SSH wrapper and documented its use.");
+        Assert.Equal(first, retry);
+
+        var journal = File.ReadAllText(queue.Layout.ResolutionJournalPath);
+        Assert.Equal(
+            1,
+            CountOccurrences(
+                journal,
+                ResolutionJournal.EntryMarker(record.Id, "Added a project SSH wrapper and documented its use.")));
+        Assert.Equal(1, CountOccurrences(journal, "Added a project SSH wrapper and documented its use."));
+
+        var differentNote = Assert.Throws<PaperqException>(() =>
+            queue.Resolve(record.Id, "A different resolution must not overwrite the first."));
+        Assert.Equal("invalid_transition", differentNote.Code);
+
+        queue.Reopen(record.Id);
+        queue.Next(claim: true);
+        queue.Resolve(record.Id, "Updated the wrapper after the SSH proxy changed.");
+        journal = File.ReadAllText(queue.Layout.ResolutionJournalPath);
+        Assert.Equal(2, CountOccurrences(journal, ResolutionJournal.EntryMarkerPrefix));
+        Assert.Equal(
+            1,
+            CountOccurrences(
+                journal,
+                ResolutionJournal.EntryMarker(record.Id, "Updated the wrapper after the SSH proxy changed.")));
+    }
+
+    private static void ConcurrentResolutionsShareOneJournal()
+    {
+        using var directory = new TestDirectory();
+        new QueueLayout(directory.Path).Create();
+        var setupQueue = new PaperqQueue(directory.Path);
+        const int count = 12;
+        var records = new List<PapercutRecord>();
+        for (var index = 0; index < count; index++)
+        {
+            var added = setupQueue.Add($"concurrent resolution {index}");
+            records.Add(added);
+            setupQueue.Next(claim: true);
+        }
+
+        var tasks = records
+            .Select((record, index) => Task.Run(() =>
+                new PaperqQueue(directory.Path).Resolve(record.Id, $"verified solution {index}")))
+            .ToArray();
+        Task.WaitAll(tasks);
+
+        var journal = File.ReadAllText(setupQueue.Layout.ResolutionJournalPath);
+        Assert.Equal(count, CountOccurrences(journal, ResolutionJournal.EntryMarkerPrefix));
+        for (var index = 0; index < records.Count; index++)
+        {
+            Assert.Equal(
+                1,
+                CountOccurrences(
+                    journal,
+                    ResolutionJournal.EntryMarker(records[index].Id, $"verified solution {index}")));
+        }
+    }
+
+    private static void ExistingResolutionDocumentIsPreserved()
+    {
+        using var directory = new TestDirectory();
+        new QueueLayout(directory.Path).Create();
+        var queue = new PaperqQueue(directory.Path);
+        var record = queue.Add("do not overwrite an unrelated document");
+        queue.Next(claim: true);
+        var journalPath = queue.Layout.ResolutionJournalPath;
+        const string existing = "# My unrelated resolutions\n";
+        File.WriteAllText(journalPath, existing);
+
+        var exception = Assert.Throws<PaperqException>(() =>
+            queue.Resolve(record.Id, "this should not be written"));
+        Assert.Equal("invalid_resolution_journal", exception.Code);
+        Assert.Equal(existing, File.ReadAllText(journalPath));
+        Assert.True(File.Exists(queue.Layout.RecordPath(QueueState.Working, record.Id)));
+    }
+
+    private static void ResolveJsonIdentifiesJournal()
+    {
+        using var directory = new TestDirectory();
+        Assert.Equal(0, RunCli(directory.Path, ["init"]).ExitCode);
+        var queue = new PaperqQueue(directory.Path);
+        var record = queue.Add("JSON resolution path");
+        queue.Next(claim: true);
+
+        var result = RunCli(directory.Path, ["resolve", record.Id, "--note", "Recorded in the journal.", "--json"]);
+        Assert.Equal(0, result.ExitCode);
+        using var document = JsonDocument.Parse(result.Output);
+        var data = document.RootElement.GetProperty("data");
+        Assert.Equal(QueueLayout.ResolutionJournalFileName, data.GetProperty("resolutionPath").GetString());
+        Assert.True(File.Exists(Path.Combine(directory.Path, data.GetProperty("resolutionPath").GetString()!)));
     }
 
     private static void DuplicateStatesAreRejected()

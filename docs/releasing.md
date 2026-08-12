@@ -23,8 +23,8 @@ The release workflow is tag-driven and accepts only `vMAJOR.MINOR.PATCH`. It als
 For example:
 
 ```powershell
-git tag -a v0.1.0 -m "paperq 0.1.0"
-git push origin v0.1.0
+git tag -a v0.2.0 -m "paperq 0.2.0"
+git push origin v0.2.0
 ```
 
 The release workflow rebuilds and tests all four runtime targets. It creates x64 and ARM64 ZIPs for Windows, plus `tar.gz` and `.deb` packages for both Linux architectures, generates `SHA256SUMS`, creates GitHub artifact attestations, and creates the GitHub Release. It fails rather than replacing an existing release.
@@ -43,7 +43,7 @@ Get-FileHash .\paperq-*.zip, .\paperq-*.tar.gz, .\paperq_*.deb -Algorithm SHA256
 GitHub's cryptographic build-provenance attestation can also be verified with the GitHub CLI:
 
 ```powershell
-gh attestation verify .\paperq-0.1.0-win-x64.zip --repo Vathivis/paperq
+gh attestation verify .\paperq-0.2.0-win-x64.zip --repo Vathivis/paperq
 ```
 
 An [artifact attestation](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations) proves which GitHub workflow, repository, commit, and event produced a file. It is not a Windows Authenticode signature and does not establish SmartScreen reputation.

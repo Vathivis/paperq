@@ -3,6 +3,7 @@ namespace Paperq;
 internal sealed class QueueInitializer
 {
     internal const string AgentsStartMarker = "<!-- paperq:agent-instructions:start -->";
+    internal const string ResolutionReferenceStartMarker = "<!-- paperq:resolutions-reference:start -->";
     internal const string GitIgnoreRule = ".papercuts/";
 
     internal static readonly string AgentInstructions = """
@@ -14,6 +15,14 @@ internal sealed class QueueInitializer
         Keep each papercut to one or two sentences. Include a suspected cause or fix only when useful. Never log secrets, credentials, full transcripts, or large raw output.
         <!-- paperq:agent-instructions:end -->
         """;
+
+    internal static readonly string ResolutionReference = """
+        <!-- paperq:resolutions-reference:start -->
+        Before retrying recurring project-specific friction, read [PAPERQ_RESOLUTIONS.md](PAPERQ_RESOLUTIONS.md) for previously verified solutions.
+        <!-- paperq:resolutions-reference:end -->
+        """;
+
+    internal static string CopyReadyInstructions => $"{AgentInstructions}\n\n{ResolutionReference}";
 
     private readonly ProjectContext _project;
 
@@ -39,6 +48,19 @@ internal sealed class QueueInitializer
     internal bool AppendAgentInstructions() =>
         TextFile.AppendOnce(AgentsPath, AgentsStartMarker, AgentInstructions);
 
+    internal bool HasResolutionReference() =>
+        TextFile.Contains(AgentsPath, ResolutionReferenceStartMarker);
+
+    internal bool AppendResolutionReference() =>
+        TextFile.AppendOnce(AgentsPath, ResolutionReferenceStartMarker, ResolutionReference);
+
+    internal (bool AgentInstructionsChanged, bool ResolutionReferenceChanged) AppendManagedAgentInstructions()
+    {
+        var instructionsChanged = AppendAgentInstructions();
+        var referenceChanged = AppendResolutionReference();
+        return (instructionsChanged, referenceChanged);
+    }
+
     internal bool HasGitIgnoreRule() =>
         _project.IsGitRepository && TextFile.HasGitIgnoreRule(GitIgnorePath, GitIgnoreRule);
 
@@ -52,4 +74,3 @@ internal sealed class QueueInitializer
         return TextFile.AppendGitIgnoreRule(GitIgnorePath, GitIgnoreRule);
     }
 }
-

@@ -108,7 +108,7 @@ internal static class TextFile
         stream.Flush(flushToDisk: true);
     }
 
-    internal static bool Contains(string path, string marker)
+    internal static bool Contains(string path, string marker, int maximumBytes = MaxManagedFileBytes)
     {
         if (!File.Exists(path))
         {
@@ -123,11 +123,15 @@ internal static class TextFile
             FileShare.Read,
             bufferSize: 4096,
             FileOptions.SequentialScan);
-        var content = ReadUtf8(stream, path, MaxManagedFileBytes);
+        var content = ReadUtf8(stream, path, maximumBytes);
         return content.Contains(marker, StringComparison.Ordinal);
     }
 
-    internal static bool AppendOnce(string path, string marker, string content)
+    internal static bool AppendOnce(
+        string path,
+        string marker,
+        string content,
+        int maximumBytes = MaxManagedFileBytes)
     {
         EnsureNotSymbolicLink(path);
         try
@@ -140,7 +144,7 @@ internal static class TextFile
                 bufferSize: 4096,
                 FileOptions.WriteThrough);
 
-            var existing = ReadUtf8(stream, path, MaxManagedFileBytes);
+            var existing = ReadUtf8(stream, path, maximumBytes);
             if (existing.Contains(marker, StringComparison.Ordinal))
             {
                 return false;
@@ -155,11 +159,11 @@ internal static class TextFile
             };
 
             var bytes = Utf8WithoutBom.GetBytes(separator + content.TrimEnd() + "\n");
-            if (stream.Length + bytes.Length > MaxManagedFileBytes)
+            if (stream.Length + bytes.Length > maximumBytes)
             {
                 throw new PaperqException(
                     "managed_file_too_large",
-                    $"Updating {path} would exceed the {MaxManagedFileBytes}-byte safety limit.",
+                    $"Updating {path} would exceed the {maximumBytes}-byte safety limit.",
                     PaperqExitCode.InvalidData);
             }
 
@@ -172,6 +176,18 @@ internal static class TextFile
         {
             throw InvalidUtf8(path, exception);
         }
+    }
+
+    internal static FileStream OpenExclusiveLock(string path)
+    {
+        EnsureNotSymbolicLink(path);
+        return new FileStream(
+            path,
+            FileMode.OpenOrCreate,
+            FileAccess.ReadWrite,
+            FileShare.None,
+            bufferSize: 1,
+            FileOptions.None);
     }
 
     internal static bool AppendGitIgnoreRule(string path, string rule)

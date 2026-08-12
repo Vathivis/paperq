@@ -23,6 +23,7 @@ internal static class QueueStateExtensions
 internal sealed class QueueLayout
 {
     internal const string QueueDirectoryName = ".papercuts";
+    internal const string ResolutionJournalFileName = "PAPERQ_RESOLUTIONS.md";
 
     private static readonly QueueState[] AllStates =
     [
@@ -36,11 +37,17 @@ internal sealed class QueueLayout
     {
         RootPath = rootPath;
         QueueRoot = Path.Combine(rootPath, QueueDirectoryName);
+        ResolutionJournalPath = Path.Combine(rootPath, ResolutionJournalFileName);
+        ResolutionJournalLockPath = Path.Combine(QueueRoot, ".resolutions.lock");
     }
 
     internal string RootPath { get; }
 
     internal string QueueRoot { get; }
+
+    internal string ResolutionJournalPath { get; }
+
+    internal string ResolutionJournalLockPath { get; }
 
     internal string StateDirectory(QueueState state) =>
         Path.Combine(QueueRoot, state.ToDirectoryName());
@@ -91,6 +98,8 @@ internal sealed class QueueLayout
 
     internal string RelativePath(QueueState state, string id) =>
         $"{QueueDirectoryName}/{state.ToDirectoryName()}/{id}.md";
+
+    internal string ResolutionJournalRelativePath => ResolutionJournalFileName;
 
     private static void EnsureDirectoryCanBeCreated(string path)
     {

@@ -149,8 +149,19 @@ internal sealed class PaperqQueue
         }
     }
 
-    internal PapercutRecord Resolve(string id, string rawNote) =>
-        Transition(id, QueueState.Working, QueueState.Resolved, "Resolved", InputRules.Validate(rawNote, "note"));
+    internal PapercutRecord Resolve(string id, string rawNote)
+    {
+        Layout.RequireInitialized();
+        PapercutId.RequireValid(id);
+        var note = InputRules.Validate(rawNote, "note");
+        var journal = new ResolutionJournal(Layout);
+        journal.ValidateExisting();
+
+        var record = ReadMatchingResolvedRecord(id, note) ??
+                     Transition(id, QueueState.Working, QueueState.Resolved, "Resolved", note);
+        journal.Append(record, note, _timeProvider.GetUtcNow());
+        return record;
+    }
 
     internal PapercutRecord Block(string id, string rawReason) =>
         Transition(id, QueueState.Working, QueueState.Blocked, "Blocked", InputRules.Validate(rawReason, "reason"));
@@ -305,6 +316,31 @@ internal sealed class PaperqQueue
         }
 
         return locations;
+    }
+
+    private PapercutRecord? ReadMatchingResolvedRecord(string id, string note)
+    {
+        var locations = FindLocations(id);
+        if (locations.Count > 1)
+        {
+            throw DuplicateRecord(id);
+        }
+
+        if (locations.Count != 1 || locations[0] != QueueState.Resolved)
+        {
+            return null;
+        }
+
+        var path = Layout.RecordPath(QueueState.Resolved, id);
+        var content = TextFile.ReadRecord(path);
+        var parsed = ParseAndVerify(content, path, id);
+        var expectedEvent = RecordCodec.FormatEvent("Resolved", note);
+        if (!InputRules.NormalizeLineEndings(content).EndsWith(expectedEvent, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        return new PapercutRecord(id, parsed.CreatedUtc, parsed.Message, QueueState.Resolved, path);
     }
 
     private static (DateTimeOffset CreatedUtc, string Message) ParseAndVerify(
