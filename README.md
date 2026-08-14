@@ -2,12 +2,28 @@
 
 `paperq` is a small, repository-local queue for the tiny problems coding agents encounter while doing real work. It writes transparent Markdown files and promotes resolved problems into a project-level solution journal; it does not run a model, collect transcripts, start a service, or send anything to a server.
 
-The project targets .NET 10 and publishes as Native AOT executables for:
+The project targets .NET 10 and publishes as Native AOT executables.
 
-- `win-x64`
-- `win-arm64`
-- `linux-x64`
-- `linux-arm64`
+## Installation
+
+### Windows
+
+`paperq` is available on WinGet:
+
+```powershell
+winget install Vathivis.paperq
+```
+
+### Linux
+
+Download the `.deb` matching the machine architecture from [GitHub Releases](https://github.com/Vathivis/paperq/releases), then install it with APT:
+
+```bash
+sudo apt install ./paperq_*_amd64.deb   # x86-64
+sudo apt install ./paperq_*_arm64.deb   # ARM64
+```
+
+The package installs the standalone executable as `/usr/bin/paperq`; it does not require a separate .NET runtime.
 
 ## Queue layout
 
@@ -180,32 +196,3 @@ dotnet publish src/Paperq/Paperq.csproj --configuration Release --runtime win-ar
 dotnet publish src/Paperq/Paperq.csproj --configuration Release --runtime linux-x64
 dotnet publish src/Paperq/Paperq.csproj --configuration Release --runtime linux-arm64
 ```
-
-Cross-operating-system Native AOT publishing is not supported. The Windows binaries must be produced on Windows; the Linux binaries must be produced on Linux with the appropriate native toolchain.
-
-## Install a Linux release
-
-Download the `.deb` matching the machine architecture, then install it with APT:
-
-```bash
-sudo apt install ./paperq_*_amd64.deb   # x86-64
-sudo apt install ./paperq_*_arm64.deb   # ARM64
-```
-
-The package installs the standalone executable as `/usr/bin/paperq`; it does not require a separate .NET runtime. The `tar.gz` archives remain available for users who prefer a manual installation.
-
-## CI and releases
-
-Pull requests and pushes to `main` build, run the executable test harness, publish Native AOT, and smoke-test all four supported runtime identifiers on matching GitHub-hosted runners.
-
-Pushing a tag whose value matches the project version, such as `v0.2.0`, creates a GitHub Release containing:
-
-- `paperq-<version>-win-x64.zip`
-- `paperq-<version>-win-arm64.zip`
-- `paperq-<version>-linux-x64.tar.gz`
-- `paperq-<version>-linux-arm64.tar.gz`
-- `paperq_<version>_amd64.deb`
-- `paperq_<version>_arm64.deb`
-- `SHA256SUMS`
-
-Release assets also receive GitHub artifact attestations. The workflow does not submit to WinGet and does not currently Authenticode-sign the Windows executable. See [Releasing and signing](docs/releasing.md) for the release procedure, provenance verification, WinGet requirements, and signing options.
