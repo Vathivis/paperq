@@ -41,7 +41,7 @@ internal sealed class PaperqQueue
             try
             {
                 TextFile.CreateNew(path, content);
-                return new PapercutRecord(id, createdUtc, message, QueueState.Open, path);
+                return new PapercutRecord(id, createdUtc, message, string.Empty, QueueState.Open, path);
             }
             catch (IOException) when (File.Exists(path))
             {
@@ -77,6 +77,43 @@ internal sealed class PaperqQueue
 
         records.Sort(CompareRecords);
         return records;
+    }
+
+    internal PapercutRecord Show(string id)
+    {
+        Layout.RequireInitialized();
+        PapercutId.RequireValid(id);
+        var locations = FindLocations(id);
+        if (locations.Count == 0)
+        {
+            throw NotFound(id);
+        }
+
+        if (locations.Count > 1)
+        {
+            throw DuplicateRecord(id);
+        }
+
+        var state = locations[0];
+        var path = Layout.RecordPath(state, id);
+        try
+        {
+            var content = TextFile.ReadRecord(path);
+            var parsed = ParseAndVerify(content, path, id);
+            return new PapercutRecord(id, parsed.CreatedUtc, parsed.Message, parsed.History, state, path);
+        }
+        catch (FileNotFoundException)
+        {
+            throw StateChanged(id);
+        }
+        catch (DirectoryNotFoundException) when (!File.Exists(path))
+        {
+            throw StateChanged(id);
+        }
+        catch (IOException exception) when (IsSharingViolation(exception))
+        {
+            throw StateChanged(id);
+        }
     }
 
     internal PapercutRecord Next(bool claim)
@@ -163,8 +200,13 @@ internal sealed class PaperqQueue
         return record;
     }
 
-    internal PapercutRecord Block(string id, string rawReason) =>
-        Transition(id, QueueState.Working, QueueState.Blocked, "Blocked", InputRules.Validate(rawReason, "reason"));
+    internal PapercutRecord Block(string id, string rawReason)
+    {
+        Layout.RequireInitialized();
+        PapercutId.RequireValid(id);
+        var reason = InputRules.Validate(rawReason, "reason");
+        return Transition(id, QueueState.Working, QueueState.Blocked, "Blocked", reason);
+    }
 
     internal PapercutRecord Reopen(string id)
     {
@@ -233,13 +275,24 @@ internal sealed class PaperqQueue
             var content = TextFile.ReadRecord(stream, source);
             var parsed = ParseAndVerify(content, source, id);
             var eventText = RecordCodec.FormatEvent(action, note);
-            if (!InputRules.NormalizeLineEndings(content).EndsWith(eventText, StringComparison.Ordinal))
+            var eventAlreadyPresent =
+                InputRules.NormalizeLineEndings(content).EndsWith(eventText, StringComparison.Ordinal);
+            if (!eventAlreadyPresent)
             {
                 TextFile.AppendUtf8(stream, eventText, source);
             }
 
             File.Move(source, destination, overwrite: false);
-            return new PapercutRecord(id, parsed.CreatedUtc, parsed.Message, destinationState, destination);
+            var history = eventAlreadyPresent
+                ? parsed.History
+                : (parsed.History + eventText).Trim('\n');
+            return new PapercutRecord(
+                id,
+                parsed.CreatedUtc,
+                parsed.Message,
+                history,
+                destinationState,
+                destination);
         }
         catch (FileNotFoundException)
         {
@@ -285,7 +338,7 @@ internal sealed class PaperqQueue
 
                 var content = TextFile.ReadRecord(path);
                 var parsed = ParseAndVerify(content, path, id);
-                records.Add(new PapercutRecord(id, parsed.CreatedUtc, parsed.Message, state, path));
+                records.Add(new PapercutRecord(id, parsed.CreatedUtc, parsed.Message, parsed.History, state, path));
             }
             catch (FileNotFoundException)
             {
@@ -340,10 +393,16 @@ internal sealed class PaperqQueue
             return null;
         }
 
-        return new PapercutRecord(id, parsed.CreatedUtc, parsed.Message, QueueState.Resolved, path);
+        return new PapercutRecord(
+            id,
+            parsed.CreatedUtc,
+            parsed.Message,
+            parsed.History,
+            QueueState.Resolved,
+            path);
     }
 
-    private static (DateTimeOffset CreatedUtc, string Message) ParseAndVerify(
+    private static (DateTimeOffset CreatedUtc, string Message, string History) ParseAndVerify(
         string content,
         string path,
         string expectedId)
@@ -357,7 +416,7 @@ internal sealed class PaperqQueue
                 PaperqExitCode.InvalidData);
         }
 
-        return (parsed.CreatedUtc, parsed.Message);
+        return (parsed.CreatedUtc, parsed.Message, parsed.History);
     }
 
     private static int CompareRecords(PapercutRecord left, PapercutRecord right)

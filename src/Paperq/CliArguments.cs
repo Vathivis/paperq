@@ -35,11 +35,13 @@ internal sealed record AddCommand(string? Message, bool ReadStdin) : CliCommand;
 
 internal sealed record ListCommand(bool IncludeResolved) : CliCommand;
 
+internal sealed record ShowCommand(string Id) : CliCommand;
+
 internal sealed record NextCommand(bool Claim) : CliCommand;
 
-internal sealed record ResolveCommand(string Id, string Note) : CliCommand;
+internal sealed record ResolveCommand(string Id, string? Note, bool ReadStdin) : CliCommand;
 
-internal sealed record BlockCommand(string Id, string Reason) : CliCommand;
+internal sealed record BlockCommand(string Id, string? Reason, bool ReadStdin) : CliCommand;
 
 internal sealed record ReopenCommand(string Id) : CliCommand;
 
@@ -62,17 +64,19 @@ internal static class CliArguments
         if (commandName is "--help" or "-h" or "help")
         {
             string? topic = null;
-            if (index < arguments.Count)
-            {
-                topic = arguments[index++];
-            }
-
             while (index < arguments.Count)
             {
-                if (!TryConsumeGlobal(arguments, ref index, globals))
+                if (TryConsumeGlobal(arguments, ref index, globals))
+                {
+                    continue;
+                }
+
+                if (topic is not null)
                 {
                     throw PaperqException.Usage("The help command accepts at most one command name.");
                 }
+
+                topic = arguments[index++];
             }
 
             return globals.Create(new HelpCommand(topic));
@@ -80,7 +84,14 @@ internal static class CliArguments
 
         if (commandName == "--version")
         {
-            EnsureNoRemaining(arguments, index, "--version");
+            while (index < arguments.Count)
+            {
+                if (!TryConsumeGlobal(arguments, ref index, globals))
+                {
+                    throw PaperqException.Usage("--version does not accept arguments.");
+                }
+            }
+
             return globals.Create(new VersionCommand());
         }
 
@@ -92,6 +103,7 @@ internal static class CliArguments
                 "init" => ParseInit(arguments, ref index, globals),
                 "add" => ParseAdd(arguments, ref index, globals),
                 "list" => ParseList(arguments, ref index, globals),
+                "show" => ParseShow(arguments, ref index, globals),
                 "next" => ParseNext(arguments, ref index, globals),
                 "resolve" => ParseResolve(arguments, ref index, globals),
                 "block" => ParseBlock(arguments, ref index, globals),
@@ -249,13 +261,19 @@ internal static class CliArguments
         return new NextCommand(claim);
     }
 
+    private static CliCommand ParseShow(
+        IReadOnlyList<string> arguments,
+        ref int index,
+        GlobalOptions globals) =>
+        new ShowCommand(ParseId(arguments, ref index, globals, "show"));
+
     private static CliCommand ParseResolve(
         IReadOnlyList<string> arguments,
         ref int index,
         GlobalOptions globals)
     {
         var parsed = ParseIdAndValue(arguments, ref index, globals, "--note", "resolve");
-        return new ResolveCommand(parsed.Id, parsed.Value);
+        return new ResolveCommand(parsed.Id, parsed.Value, parsed.ReadStdin);
     }
 
     private static CliCommand ParseBlock(
@@ -264,63 +282,22 @@ internal static class CliArguments
         GlobalOptions globals)
     {
         var parsed = ParseIdAndValue(arguments, ref index, globals, "--reason", "block");
-        return new BlockCommand(parsed.Id, parsed.Value);
+        return new BlockCommand(parsed.Id, parsed.Value, parsed.ReadStdin);
     }
 
     private static CliCommand ParseReopen(
         IReadOnlyList<string> arguments,
         ref int index,
         GlobalOptions globals)
-    {
-        string? id = null;
-        var literal = false;
-        while (index < arguments.Count)
-        {
-            if (!literal && arguments[index] == "--")
-            {
-                literal = true;
-                index++;
-                continue;
-            }
+        => new ReopenCommand(ParseId(arguments, ref index, globals, "reopen"));
 
-            if (!literal && arguments[index] is "--help" or "-h")
-            {
-                index++;
-                return new HelpCommand("reopen");
-            }
-
-            if (!literal && TryConsumeGlobal(arguments, ref index, globals))
-            {
-                continue;
-            }
-
-            if (!literal && arguments[index].StartsWith("-", StringComparison.Ordinal))
-            {
-                throw PaperqException.Usage($"Unknown reopen option: {arguments[index]}");
-            }
-
-            if (id is not null)
-            {
-                throw PaperqException.Usage("Usage: paperq reopen <id>");
-            }
-
-            id = arguments[index++];
-        }
-
-        return id is null
-            ? throw PaperqException.Usage("Usage: paperq reopen <id>")
-            : new ReopenCommand(id);
-    }
-
-    private static (string Id, string Value) ParseIdAndValue(
+    private static string ParseId(
         IReadOnlyList<string> arguments,
         ref int index,
         GlobalOptions globals,
-        string optionName,
         string commandName)
     {
         string? id = null;
-        string? value = null;
         var literal = false;
         while (index < arguments.Count)
         {
@@ -335,6 +312,66 @@ internal static class CliArguments
             {
                 index++;
                 throw new HelpRequestedException(commandName);
+            }
+
+            if (!literal && TryConsumeGlobal(arguments, ref index, globals))
+            {
+                continue;
+            }
+
+            if (!literal && arguments[index].StartsWith("-", StringComparison.Ordinal))
+            {
+                throw PaperqException.Usage($"Unknown {commandName} option: {arguments[index]}");
+            }
+
+            if (id is not null)
+            {
+                throw PaperqException.Usage($"Usage: paperq {commandName} <id>");
+            }
+
+            id = arguments[index++];
+        }
+
+        return id ?? throw PaperqException.Usage($"Usage: paperq {commandName} <id>");
+    }
+
+    private static (string Id, string? Value, bool ReadStdin) ParseIdAndValue(
+        IReadOnlyList<string> arguments,
+        ref int index,
+        GlobalOptions globals,
+        string optionName,
+        string commandName)
+    {
+        string? id = null;
+        string? value = null;
+        var stdin = false;
+        var literal = false;
+        var usage = $"Usage: paperq {commandName} <id> ({optionName} <text> | --stdin)";
+        while (index < arguments.Count)
+        {
+            if (!literal && arguments[index] == "--")
+            {
+                literal = true;
+                index++;
+                continue;
+            }
+
+            if (!literal && arguments[index] is "--help" or "-h")
+            {
+                index++;
+                throw new HelpRequestedException(commandName);
+            }
+
+            if (!literal && arguments[index] == "--stdin")
+            {
+                if (stdin)
+                {
+                    throw PaperqException.Usage("--stdin can only be supplied once.");
+                }
+
+                stdin = true;
+                index++;
+                continue;
             }
 
             if (!literal && TryConsumeValueOption(arguments, ref index, optionName, out var optionValue))
@@ -360,18 +397,18 @@ internal static class CliArguments
 
             if (id is not null)
             {
-                throw PaperqException.Usage($"Usage: paperq {commandName} <id> {optionName} <text>");
+                throw PaperqException.Usage(usage);
             }
 
             id = arguments[index++];
         }
 
-        if (id is null || value is null)
+        if (id is null || stdin == (value is not null))
         {
-            throw PaperqException.Usage($"Usage: paperq {commandName} <id> {optionName} <text>");
+            throw PaperqException.Usage(usage);
         }
 
-        return (id, value);
+        return (id, value, stdin);
     }
 
     private static bool TryConsumeValueOption(
@@ -435,14 +472,6 @@ internal static class CliArguments
 
         globals.SetRoot(arguments[index++]);
         return true;
-    }
-
-    private static void EnsureNoRemaining(IReadOnlyList<string> arguments, int index, string command)
-    {
-        if (index != arguments.Count)
-        {
-            throw PaperqException.Usage($"{command} does not accept arguments.");
-        }
     }
 
     private sealed class GlobalOptions

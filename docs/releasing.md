@@ -23,8 +23,9 @@ The release workflow is tag-driven and accepts only `vMAJOR.MINOR.PATCH`. It als
 For example:
 
 ```powershell
-git tag -a v0.2.0 -m "paperq 0.2.0"
-git push origin v0.2.0
+$version = "1.0.0"
+git tag -a "v$version" -m "paperq $version"
+git push origin "v$version"
 ```
 
 The release workflow rebuilds and tests all four runtime targets. It creates x64 and ARM64 ZIPs for Windows, plus `tar.gz` and `.deb` packages for both Linux architectures, generates `SHA256SUMS`, creates GitHub artifact attestations, and creates the GitHub Release. It fails rather than replacing an existing release.
@@ -36,14 +37,39 @@ No workflow submits anything to the WinGet community repository. Submission rema
 Verify the checksums after downloading all seven files from a release:
 
 ```powershell
-$expected = Get-Content .\SHA256SUMS
-Get-FileHash .\paperq-*.zip, .\paperq-*.tar.gz, .\paperq_*.deb -Algorithm SHA256
+$checksumLines = @(Get-Content -LiteralPath .\SHA256SUMS)
+if ($checksumLines.Count -ne 6) {
+    throw "Expected six release checksums, found $($checksumLines.Count)."
+}
+
+foreach ($line in $checksumLines) {
+    if ($line -notmatch '^([0-9a-fA-F]{64})  (.+)$') {
+        throw "Invalid SHA256SUMS entry: $line"
+    }
+
+    $expectedHash = $Matches[1].ToLowerInvariant()
+    $fileName = $Matches[2]
+    if ([System.IO.Path]::GetFileName($fileName) -ne $fileName) {
+        throw "Unsafe release filename in SHA256SUMS: $fileName"
+    }
+
+    $assetPath = Join-Path $PWD $fileName
+    if (-not (Test-Path -LiteralPath $assetPath -PathType Leaf)) {
+        throw "Missing release asset: $fileName"
+    }
+
+    $actualHash = (Get-FileHash -LiteralPath $assetPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actualHash -ne $expectedHash) {
+        throw "Checksum mismatch for $fileName"
+    }
+}
 ```
 
 GitHub's cryptographic build-provenance attestation can also be verified with the GitHub CLI:
 
 ```powershell
-gh attestation verify .\paperq-0.2.0-win-x64.zip --repo Vathivis/paperq
+$version = "1.0.0"
+gh attestation verify ".\paperq-$version-win-x64.zip" --repo Vathivis/paperq
 ```
 
 An [artifact attestation](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations) proves which GitHub workflow, repository, commit, and event produced a file. It is not a Windows Authenticode signature and does not establish SmartScreen reputation.
@@ -78,13 +104,12 @@ The provider-specific action and identity settings are intentionally not present
 
 ## Preparing the WinGet submission
 
-After the first release succeeds:
+After a new release succeeds, copy the latest tracked manifest set under `winget-manifests/manifests/v/Vathivis/paperq/` into a directory named for the new version, then:
 
-1. choose the final WinGet `PackageIdentifier` and add an explicit repository license;
-2. use the immutable GitHub Release URLs for the Windows x64 and ARM64 ZIPs;
-3. add one portable installer entry per architecture and declare each ZIP's nested executable as `paperq.exe`;
-4. set each `InstallerSha256` from its published archive;
-5. validate the manifest and test installation, upgrade, invocation, and uninstall in Windows Sandbox;
-6. submit the reviewed manifest to `microsoft/winget-pkgs`.
+1. update every `PackageVersion`, release-note URL, and Windows asset URL;
+2. set each `InstallerSha256` from the immutable published archive;
+3. preserve one portable installer entry per architecture and the nested executable name `paperq.exe`;
+4. validate the manifest and test installation, upgrade, invocation, and uninstall in Windows Sandbox;
+5. submit the reviewed manifest to `microsoft/winget-pkgs`.
 
 Signing can be added before or after the first WinGet submission. If the executable changes from unsigned to signed, publish it as a new version because the release asset and its SHA-256 must remain immutable.

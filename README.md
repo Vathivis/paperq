@@ -38,7 +38,7 @@ PAPERQ_RESOLUTIONS.md
 
 Each papercut is one Markdown file. Its directory is its current state. `next --claim` takes an exclusive handle and atomically moves the oldest open record into `working`, so concurrent local agents cannot claim the same item.
 
-`PAPERQ_RESOLUTIONS.md` is created lazily by the first successful `resolve`. Every resolution performed by PaperQ 0.2.0 adds the original problem, the resolution note, the journal recording time, and a link to the detailed record in `.papercuts/resolved`. The root-level journal is not covered by the optional `.papercuts/` ignore rule, so it can be committed and shared as durable project knowledge. Existing v0.1 resolved records are not backfilled automatically because their free-form history has no unambiguous machine-readable resolution boundary.
+`PAPERQ_RESOLUTIONS.md` is created lazily by the first successful `resolve`. Every resolution adds the original problem, the resolution note, the journal recording time, and a link to the detailed record in `.papercuts/resolved`. The root-level journal is not covered by the optional `.papercuts/` ignore rule, so it can be committed and shared as durable project knowledge. Existing v0.1 resolved records are not backfilled automatically because their free-form history has no unambiguous machine-readable resolution boundary.
 
 The queue and resolution-journal concurrency guarantees cover processes sharing one local filesystem. Git merges and cloud-sync conflicts between separate computers are outside the guarantee.
 
@@ -49,9 +49,12 @@ paperq init [--append-agents] [--gitignore]
 paperq add "message"
 paperq add --stdin
 paperq list [--all]
+paperq show <id>
 paperq next [--claim]
 paperq resolve <id> --note "evidence"
+paperq resolve <id> --stdin
 paperq block <id> --reason "reason"
+paperq block <id> --stdin
 paperq reopen <id>
 ```
 
@@ -62,17 +65,54 @@ Every command accepts these global options:
 --json         Write the versioned JSON contract to stdout.
 ```
 
+Global options may appear before or after a command.
+
 Without `--root`, `paperq` walks upward from the current directory to find the nearest `.git` directory or file. If it finds none, it uses the current directory. An explicit `--root` is always used exactly as supplied.
+
+## Capture and maintenance workflows
+
+### Capture during normal work
+
+PaperQ's default agent workflow is deliberately one-way: when an agent encounters small, non-blocking friction, it records the papercut with `add` and immediately returns to its original task. The papercut remains `open`. A normal working agent does not claim, investigate, resolve, block, reopen, or delegate it unless the user or project-specific instructions explicitly request that behavior.
+
+This keeps incidental friction from expanding the current task and preserves the queue for a later focused maintenance pass.
+
+### Dedicated maintenance pass
+
+When an agent is explicitly assigned papercut maintenance, it acts as the resolver:
+
+1. read `PAPERQ_RESOLUTIONS.md` if it exists, so verified approaches are not repeated;
+2. run `paperq list` to understand the active queue;
+3. claim the oldest open item with `paperq next --claim`;
+4. inspect its full message and history with `paperq show <id>`;
+5. investigate and fix the underlying friction;
+6. record verified evidence with `resolve`, or use `block` with a concrete reason when work cannot proceed;
+7. repeat until no open papercuts remain.
+
+Resolution notes and block reasons can be supplied inline or read from standard input with `--stdin`.
+
+### Optional parallel resolution
+
+PaperQ stores queue state; it does not launch models or agents. An environment that supports subagents may use separate user or project instructions to dispatch a resolver after `add` while the main agent continues its task. That external orchestration policy owns the resolver model, reasoning effort, permissions, concurrency, and write coordination.
+
+| Command | State behavior |
+|---|---|
+| `add` | Creates an `open` papercut. |
+| `next` | Previews the oldest open papercut without changing it. |
+| `next --claim` | Atomically moves the oldest open papercut to `working`. |
+| `show <id>` | Shows the full message and lifecycle history from any state. |
+| `resolve` | Moves a `working` papercut to `resolved` and updates the resolution journal. |
+| `block` | Moves a `working` papercut to `blocked`. |
+| `reopen` | Moves a `working`, `blocked`, or `resolved` papercut back to `open`. |
 
 `list` shows `open`, `working`, and `blocked` records by default. `list --all` also includes resolved records. Selection is oldest-first using the UTC creation time and then the ID as a deterministic tie-breaker.
 
 ## Initialization
 
-`paperq init` creates only the queue directories automatically. In an interactive terminal it also:
+`paperq init` creates only the queue directories automatically. Without `--json`, it always prints paste-ready `AGENTS.md` instructions and a short resolution-journal reference. In an interactive terminal it also:
 
-1. prints paste-ready `AGENTS.md` instructions and a short resolution-journal reference;
-2. asks whether to create or append the root `AGENTS.md`, defaulting to No;
-3. when the selected root is a Git repository, asks whether to add `.papercuts/` to `.gitignore`, defaulting to No.
+1. asks whether to create or append the root `AGENTS.md`, defaulting to No;
+2. when the selected root is a Git repository, asks whether to add `.papercuts/` to `.gitignore`, defaulting to No.
 
 When input or output is redirected, or `--json` is used, `init` does not prompt and does not modify `AGENTS.md` or `.gitignore`. Automation can request those changes explicitly with `--append-agents` and `--gitignore`. Both edits are idempotent, and `--gitignore` is rejected outside a Git repository. `--append-agents` preserves custom instructions and appends only PaperQ's managed blocks; running it against an older PaperQ block adds the missing journal reference without duplicating or rewriting existing content.
 
@@ -84,13 +124,15 @@ Paste this block into the repository's root `AGENTS.md`, or let `paperq init` ad
 <!-- paperq:agent-instructions:start -->
 ## Papercuts
 
-During normal work, record small, non-blocking friction with `paperq add "<concise message>"` or `paperq add --stdin`, then continue the main task. Examples include dead-end tool calls, broken links, flaky commands, stale caches, confusing errors, and undocumented setup.
+During normal work, record small, non-blocking friction with `paperq add "<concise message>"` or `paperq add --stdin` without resolving it, then continue the main task. Examples include dead-end tool calls, broken links, flaky commands, stale caches, confusing errors, and undocumented setup.
 
 Keep each papercut to one or two sentences. Include a suspected cause or fix only when useful. Never log secrets, credentials, full transcripts, or large raw output.
+
+When explicitly assigned papercut maintenance, read `PAPERQ_RESOLUTIONS.md` if it exists, then process the queue one item at a time with `paperq list`, `paperq next --claim`, and `paperq show <id>`. Investigate the claimed item, use `paperq resolve <id> --note "<verified solution>"` when fixed or `paperq block <id> --reason "<reason>"` when it cannot proceed, then continue until no open papercuts remain.
 <!-- paperq:agent-instructions:end -->
 
 <!-- paperq:resolutions-reference:start -->
-Before retrying recurring project-specific friction, read [PAPERQ_RESOLUTIONS.md](PAPERQ_RESOLUTIONS.md) for previously verified solutions.
+If `PAPERQ_RESOLUTIONS.md` exists, read it before retrying recurring project-specific friction. PaperQ creates it after the first successful `resolve`.
 <!-- paperq:resolutions-reference:end -->
 ```
 
@@ -143,7 +185,7 @@ The setup command fails until the stale cache is removed.
 Added a cache cleanup step to the setup script and verified it from a clean shell.
 ```
 
-The resolved record remains the full audit trail. `PAPERQ_RESOLUTIONS.md` is the concise lookup future agents are told to read. Repeating the same `resolve <id> --note <text>` after an interrupted journal update is safe and does not duplicate the entry.
+The resolved record remains the full audit trail. `PAPERQ_RESOLUTIONS.md` is the concise lookup future agents are told to read. Repeating the same resolution note after an interrupted journal update is safe and does not duplicate the entry.
 
 ## Input and safety
 
@@ -164,7 +206,7 @@ JSON output uses a stable, versioned envelope and stays on stdout, including str
 {"schemaVersion":1,"ok":true,"command":"add","data":{"id":"20260805T142301123Z-a7f3c921de","state":"open","created":"2026-08-05T14:23:01.1230000+00:00","message":"Example","path":".papercuts/open/20260805T142301123Z-a7f3c921de.md"}}
 ```
 
-Successful `resolve --json` responses retain the record fields and add `"resolutionPath":"PAPERQ_RESOLUTIONS.md"`.
+Successful `resolve --json` responses retain the record fields and add `"resolutionPath":"PAPERQ_RESOLUTIONS.md"`. Successful `show --json` responses add the raw lifecycle `history` text.
 
 | Exit code | Meaning |
 |---:|---|
@@ -185,7 +227,7 @@ dotnet build paperq.slnx --configuration Release
 dotnet run --project tests/Paperq.Tests/Paperq.Tests.csproj --configuration Release
 ```
 
-Publish Native AOT on the matching operating system:
+Publish Native AOT on the matching operating system. Windows targets require Windows, while Linux targets require Linux and the native toolchain:
 
 ```powershell
 dotnet publish src/Paperq/Paperq.csproj --configuration Release --runtime win-x64

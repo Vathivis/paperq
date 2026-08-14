@@ -14,7 +14,11 @@ internal static class TestSuite
         ("init migrates legacy AGENTS without changing custom instructions", InitMigratesLegacyAgents),
         ("gitignore flag requires Git", GitIgnoreRequiresGit),
         ("add and JSON list preserve Markdown", AddAndList),
+        ("show returns a full record and history", ShowReturnsFullRecord),
         ("input safety limits", InputSafetyLimits),
+        ("lifecycle text supports stdin", LifecycleTextSupportsStdin),
+        ("global options are order-independent", GlobalOptionsAreOrderIndependent),
+        ("lifecycle errors use consistent preconditions", LifecyclePreconditionsAreConsistent),
         ("FIFO selection and claiming", FifoSelectionAndClaiming),
         ("concurrent claims are unique", ConcurrentClaimsAreUnique),
         ("concurrent lifecycle transitions have one winner", ConcurrentLifecycleTransitionsHaveOneWinner),
@@ -81,6 +85,9 @@ internal static class TestSuite
         var result = RunCli(directory.Path, ["init"]);
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("Paste-ready AGENTS.md instructions", result.Output);
+        Assert.Contains("without resolving it, then continue the main task", result.Output);
+        Assert.Contains("When explicitly assigned papercut maintenance", result.Output);
+        Assert.Contains("If `PAPERQ_RESOLUTIONS.md` exists", result.Output);
 
         foreach (var state in new[] { "open", "working", "blocked", "resolved" })
         {
@@ -178,6 +185,31 @@ internal static class TestSuite
         Assert.True(items[1].GetProperty("message").GetString()!.Contains("\n", StringComparison.Ordinal));
     }
 
+    private static void ShowReturnsFullRecord()
+    {
+        using var directory = new TestDirectory();
+        Assert.Equal(0, RunCli(directory.Path, ["init"]).ExitCode);
+        var queue = new PaperqQueue(directory.Path);
+        var record = queue.Add("First line\nSecond line with full detail.");
+        queue.Next(claim: true);
+        queue.Block(record.Id, "Waiting for a reproducible environment.");
+
+        var human = RunCli(directory.Path, ["show", record.Id]);
+        Assert.Equal(0, human.ExitCode);
+        Assert.Contains("State:   blocked", human.Output);
+        Assert.Contains("Second line with full detail.", human.Output);
+        Assert.Contains("History:\n### Blocked", InputRules.NormalizeLineEndings(human.Output));
+        Assert.Contains("Waiting for a reproducible environment.", human.Output);
+
+        var json = RunCli(directory.Path, ["show", "--json", record.Id]);
+        Assert.Equal(0, json.ExitCode);
+        using var document = JsonDocument.Parse(json.Output);
+        var data = document.RootElement.GetProperty("data");
+        Assert.Equal("blocked", data.GetProperty("state").GetString());
+        Assert.True(data.GetProperty("message").GetString()!.Contains('\n', StringComparison.Ordinal));
+        Assert.Contains("### Blocked", data.GetProperty("history").GetString()!);
+    }
+
     private static void InputSafetyLimits()
     {
         using var directory = new TestDirectory();
@@ -195,6 +227,75 @@ internal static class TestSuite
         Assert.Equal(
             (int)PaperqExitCode.InvalidData,
             RunCli(directory.Path, ["add", RecordCodec.EventsMarker]).ExitCode);
+    }
+
+    private static void LifecycleTextSupportsStdin()
+    {
+        using var directory = new TestDirectory();
+        Assert.Equal(0, RunCli(directory.Path, ["init"]).ExitCode);
+        var queue = new PaperqQueue(directory.Path);
+        var record = queue.Add("Lifecycle stdin");
+        queue.Next(claim: true);
+
+        var blocked = RunCli(
+            directory.Path,
+            ["block", record.Id, "--stdin"],
+            "First blocking line\r\nSecond blocking line\r\n");
+        Assert.Equal(0, blocked.ExitCode);
+        Assert.Contains(
+            "First blocking line\nSecond blocking line",
+            InputRules.NormalizeLineEndings(File.ReadAllText(
+                queue.Layout.RecordPath(QueueState.Blocked, record.Id))));
+
+        Assert.Equal(0, RunCli(directory.Path, ["reopen", record.Id]).ExitCode);
+        Assert.Equal(0, RunCli(directory.Path, ["next", "--claim"]).ExitCode);
+        var resolved = RunCli(
+            directory.Path,
+            ["resolve", record.Id, "--stdin", "--json"],
+            "Verified from stdin.\r\nKept multiline evidence.\r\n");
+        Assert.Equal(0, resolved.ExitCode);
+        Assert.Contains(
+            "Verified from stdin.\nKept multiline evidence.",
+            InputRules.NormalizeLineEndings(File.ReadAllText(queue.Layout.ResolutionJournalPath)));
+
+        var conflicting = RunCli(
+            directory.Path,
+            ["resolve", record.Id, "--note", "inline", "--stdin"],
+            "stdin");
+        Assert.Equal((int)PaperqExitCode.UsageError, conflicting.ExitCode);
+    }
+
+    private static void GlobalOptionsAreOrderIndependent()
+    {
+        using var directory = new TestDirectory();
+
+        var help = RunCli(directory.Path, ["help", "--json", "add"]);
+        Assert.Equal(0, help.ExitCode);
+        using (var document = JsonDocument.Parse(help.Output))
+        {
+            Assert.Equal("help", document.RootElement.GetProperty("command").GetString());
+            Assert.Equal("add", document.RootElement.GetProperty("data").GetProperty("topic").GetString());
+        }
+
+        var version = RunCli(directory.Path, ["--version", "--json"]);
+        Assert.Equal(0, version.ExitCode);
+        using var versionDocument = JsonDocument.Parse(version.Output);
+        Assert.Equal("1.0.0", versionDocument.RootElement.GetProperty("data").GetProperty("version").GetString());
+    }
+
+    private static void LifecyclePreconditionsAreConsistent()
+    {
+        using var directory = new TestDirectory();
+        const string id = "20260805T142301123Z-a7f3c921de";
+
+        var blocked = RunCli(directory.Path, ["block", id, "--reason", ""]);
+        var resolved = RunCli(directory.Path, ["resolve", id, "--note", ""]);
+        var blockedStdin = RunCli(directory.Path, ["block", id, "--stdin"]);
+        var resolvedStdin = RunCli(directory.Path, ["resolve", id, "--stdin"]);
+        Assert.Equal((int)PaperqExitCode.NotInitialized, blocked.ExitCode);
+        Assert.Equal(resolved.ExitCode, blocked.ExitCode);
+        Assert.Equal(blocked.ExitCode, blockedStdin.ExitCode);
+        Assert.Equal(resolved.ExitCode, resolvedStdin.ExitCode);
     }
 
     private static void FifoSelectionAndClaiming()
@@ -258,9 +359,17 @@ internal static class TestSuite
         var added = queue.Add("The cache is stale.");
         queue.Next(claim: true);
 
-        var blocked = queue.Block(added.Id, "Needs access to the remote service.");
+        const string reason = "Needs access to the remote service.";
+        var workingPath = queue.Layout.RecordPath(QueueState.Working, added.Id);
+        using (var stream = TextFile.OpenRecordForTransition(workingPath))
+        {
+            TextFile.AppendUtf8(stream, RecordCodec.FormatEvent("Blocked", reason), workingPath);
+        }
+
+        var blocked = queue.Block(added.Id, reason);
         Assert.Equal(QueueState.Blocked, blocked.State);
         Assert.Contains("### Blocked\n\nNeeds access", File.ReadAllText(blocked.FullPath));
+        Assert.Equal(1, CountOccurrences(blocked.History, "### Blocked"));
 
         var reopened = queue.Reopen(added.Id);
         Assert.Equal(QueueState.Open, reopened.State);
@@ -438,6 +547,8 @@ internal static class TestSuite
 
         var exception = Assert.Throws<PaperqException>(() => queue.List(includeResolved: true));
         Assert.Equal("duplicate_record", exception.Code);
+        var showException = Assert.Throws<PaperqException>(() => queue.Show(record.Id));
+        Assert.Equal("duplicate_record", showException.Code);
     }
 
     private static void JsonErrorsStayOnStdout()

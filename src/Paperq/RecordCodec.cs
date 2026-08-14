@@ -14,7 +14,9 @@ internal static class RecordCodec
     internal static string FormatNew(string id, DateTimeOffset createdUtc, string message) =>
         $"{Prefix}{id}\n{CreatedPrefix}{createdUtc:O}{MessageHeading}{message}{HistoryDelimiter}\n";
 
-    internal static (string Id, DateTimeOffset CreatedUtc, string Message) Parse(string content, string path)
+    internal static (string Id, DateTimeOffset CreatedUtc, string Message, string History) Parse(
+        string content,
+        string path)
     {
         var normalized = InputRules.NormalizeLineEndings(content);
         if (!normalized.StartsWith(Prefix, StringComparison.Ordinal))
@@ -67,6 +69,7 @@ internal static class RecordCodec
         }
 
         var message = normalized[messageStart..historyStart];
+        var history = normalized[(historyStart + HistoryDelimiter.Length)..].Trim('\n');
         try
         {
             message = InputRules.Validate(message, "record message");
@@ -80,7 +83,7 @@ internal static class RecordCodec
                 exception);
         }
 
-        return (id, createdUtc, message);
+        return (id, createdUtc, message, history);
     }
 
     internal static string FormatEvent(string action, string? note)

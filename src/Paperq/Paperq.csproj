@@ -10,6 +10,6 @@
     <AnalysisLevel>latest</AnalysisLevel>
     <PublishAot>true</PublishAot>
     <OptimizationPreference>Size</OptimizationPreference>
-    <Version>0.2.0</Version>
+    <Version>1.0.0</Version>
   </PropertyGroup>
 </Project>

@@ -55,6 +55,7 @@ internal static class CliApplication
             InitCommand command => ExecuteInit(project, command, invocation.Json, io),
             AddCommand command => ExecuteAdd(project, command, invocation.Json, io),
             ListCommand command => ExecuteList(project, command, invocation.Json, io),
+            ShowCommand command => ExecuteShow(project, command, invocation.Json, io),
             NextCommand command => ExecuteNext(project, command, invocation.Json, io),
             ResolveCommand command => ExecuteResolve(project, command, invocation.Json, io),
             BlockCommand command => ExecuteBlock(project, command, invocation.Json, io),
@@ -240,10 +241,32 @@ internal static class CliApplication
         return (int)PaperqExitCode.Success;
     }
 
+    private static int ExecuteShow(ProjectContext project, ShowCommand command, bool json, CliIo io)
+    {
+        var queue = CreateQueue(project);
+        var record = queue.Show(command.Id);
+        if (json)
+        {
+            WriteRecordSuccess(io, "show", record, queue.Layout, writer =>
+                writer.WriteString("history", record.History));
+        }
+        else
+        {
+            WriteRecordHuman(io.Output, record, queue.Layout);
+        }
+
+        return (int)PaperqExitCode.Success;
+    }
+
     private static int ExecuteResolve(ProjectContext project, ResolveCommand command, bool json, CliIo io)
     {
         var queue = CreateQueue(project);
-        var record = queue.Resolve(command.Id, command.Note);
+        queue.Layout.RequireInitialized();
+        PapercutId.RequireValid(command.Id);
+        var note = command.ReadStdin
+            ? InputRules.ReadBounded(io.Input, "note")
+            : command.Note!;
+        var record = queue.Resolve(command.Id, note);
         if (json)
         {
             WriteRecordSuccess(io, "resolve", record, queue.Layout, writer =>
@@ -261,7 +284,12 @@ internal static class CliApplication
     private static int ExecuteBlock(ProjectContext project, BlockCommand command, bool json, CliIo io)
     {
         var queue = CreateQueue(project);
-        var record = queue.Block(command.Id, command.Reason);
+        queue.Layout.RequireInitialized();
+        PapercutId.RequireValid(command.Id);
+        var reason = command.ReadStdin
+            ? InputRules.ReadBounded(io.Input, "reason")
+            : command.Reason!;
+        var record = queue.Block(command.Id, reason);
         return WriteTransitionResult(io, json, "block", "Blocked", record, queue.Layout);
     }
 
@@ -360,6 +388,12 @@ internal static class CliApplication
         output.WriteLine($"Path:    {layout.RelativePath(record.State, record.Id)}");
         output.WriteLine("Message:");
         output.WriteLine(record.Message);
+        if (!string.IsNullOrEmpty(record.History))
+        {
+            output.WriteLine();
+            output.WriteLine("History:");
+            output.WriteLine(record.History);
+        }
     }
 
     private static void WriteError(
@@ -414,9 +448,10 @@ internal static class CliApplication
               paperq add <message>
               paperq add --stdin
               paperq list [--all]
+              paperq show <id>
               paperq next [--claim]
-              paperq resolve <id> --note <text>
-              paperq block <id> --reason <text>
+              paperq resolve <id> (--note <text> | --stdin)
+              paperq block <id> (--reason <text> | --stdin)
               paperq reopen <id>
 
             Global options:
@@ -424,14 +459,16 @@ internal static class CliApplication
               --json         Emit the stable JSON schema on stdout.
               --help, -h     Show help.
               --version      Show the version.
+
+            Global options may appear before or after a command.
             """,
         "init" => """
             Usage: paperq init [--append-agents] [--gitignore]
 
-            Creates .papercuts/open, working, blocked, and resolved. Interactive use
-            offers to add PaperQ instructions plus a one-line resolution-journal reference
-            to AGENTS.md and, inside Git, update .gitignore.
-            Non-interactive use changes those files only when the explicit flags are set.
+            Creates .papercuts/open, working, blocked, and resolved. Human-readable use
+            prints paste-ready AGENTS.md instructions. Interactive use also offers to add
+            those instructions and, inside Git, update .gitignore. Non-interactive use
+            changes those files only when the explicit flags are set.
             """,
         "add" => """
             Usage: paperq add <message> | paperq add --stdin
@@ -443,18 +480,23 @@ internal static class CliApplication
 
             Lists open, working, and blocked records. --all also includes resolved records.
             """,
+        "show" => """
+            Usage: paperq show <id>
+
+            Shows one papercut from any state, including its full message and history.
+            """,
         "next" => """
             Usage: paperq next [--claim]
 
             Selects the oldest open record. --claim atomically moves it to working.
             """,
         "resolve" => """
-            Usage: paperq resolve <id> --note <text>
+            Usage: paperq resolve <id> (--note <text> | --stdin)
 
             Moves a working papercut to resolved and adds its problem and solution to
-            PAPERQ_RESOLUTIONS.md for future agents.
+            PAPERQ_RESOLUTIONS.md for future agents. --stdin reads the note from standard input.
             """,
-        "block" => "Usage: paperq block <id> --reason <text>",
+        "block" => "Usage: paperq block <id> (--reason <text> | --stdin)",
         "reopen" => "Usage: paperq reopen <id>",
         _ => throw PaperqException.Usage($"Unknown help topic: {topic}"),
     };
