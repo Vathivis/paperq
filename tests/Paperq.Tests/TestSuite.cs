@@ -20,7 +20,9 @@ internal static class TestSuite
         ("global options are order-independent", GlobalOptionsAreOrderIndependent),
         ("lifecycle errors use consistent preconditions", LifecyclePreconditionsAreConsistent),
         ("FIFO selection and claiming", FifoSelectionAndClaiming),
+        ("claim by ID is explicit and out of order", ClaimByIdIsExplicitAndOutOfOrder),
         ("concurrent claims are unique", ConcurrentClaimsAreUnique),
+        ("concurrent claims by ID have one winner", ConcurrentClaimsByIdHaveOneWinner),
         ("concurrent lifecycle transitions have one winner", ConcurrentLifecycleTransitionsHaveOneWinner),
         ("block, reopen, and resolve lifecycle", LifecycleTransitions),
         ("resolution journal retries are idempotent", ResolutionJournalRetriesAreIdempotent),
@@ -87,6 +89,7 @@ internal static class TestSuite
         Assert.Contains("Paste-ready AGENTS.md instructions", result.Output);
         Assert.Contains("after the record is added, end the papercut-capture side-track and continue the main task", result.Output);
         Assert.Contains("When explicitly assigned papercut maintenance", result.Output);
+        Assert.Contains("When the user explicitly selects a specific papercut ID", result.Output);
         Assert.Contains("If `PAPERQ_RESOLUTIONS.md` exists", result.Output);
 
         foreach (var state in new[] { "open", "working", "blocked", "resolved" })
@@ -280,7 +283,7 @@ internal static class TestSuite
         var version = RunCli(directory.Path, ["--version", "--json"]);
         Assert.Equal(0, version.ExitCode);
         using var versionDocument = JsonDocument.Parse(version.Output);
-        Assert.Equal("1.0.0", versionDocument.RootElement.GetProperty("data").GetProperty("version").GetString());
+        Assert.Equal("1.0.1", versionDocument.RootElement.GetProperty("data").GetProperty("version").GetString());
     }
 
     private static void LifecyclePreconditionsAreConsistent()
@@ -349,6 +352,70 @@ internal static class TestSuite
             $"Expected {count} distinct claims, got {distinct.Length}: {string.Join(", ", claimed)}");
         Assert.Equal(0, Directory.GetFiles(Path.Combine(directory.Path, ".papercuts", "open"), "*.md").Length);
         Assert.Equal(count, Directory.GetFiles(Path.Combine(directory.Path, ".papercuts", "working"), "*.md").Length);
+    }
+
+    private static void ClaimByIdIsExplicitAndOutOfOrder()
+    {
+        using var directory = new TestDirectory();
+        new QueueLayout(directory.Path).Create();
+        var clock = new SequenceTimeProvider(
+            new DateTimeOffset(2026, 8, 5, 10, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2026, 8, 5, 10, 0, 1, TimeSpan.Zero),
+            new DateTimeOffset(2026, 8, 5, 10, 0, 2, TimeSpan.Zero));
+        var queue = new PaperqQueue(directory.Path, clock);
+        var first = queue.Add("first");
+        var selected = queue.Add("selected");
+        var third = queue.Add("third");
+
+        var result = RunCli(directory.Path, ["claim", selected.Id, "--json"]);
+        Assert.Equal(0, result.ExitCode);
+        using var document = JsonDocument.Parse(result.Output);
+        Assert.Equal("claim", document.RootElement.GetProperty("command").GetString());
+        var data = document.RootElement.GetProperty("data");
+        Assert.Equal(selected.Id, data.GetProperty("id").GetString());
+        Assert.Equal("working", data.GetProperty("state").GetString());
+        Assert.True(data.GetProperty("claimed").GetBoolean());
+
+        Assert.True(File.Exists(first.FullPath));
+        Assert.False(File.Exists(selected.FullPath));
+        Assert.True(File.Exists(queue.Layout.RecordPath(QueueState.Working, selected.Id)));
+        Assert.True(File.Exists(third.FullPath));
+        Assert.Equal(first.Id, queue.Next(claim: false).Id);
+
+        var repeated = RunCli(directory.Path, ["claim", selected.Id, "--json"]);
+        Assert.Equal((int)PaperqExitCode.Conflict, repeated.ExitCode);
+        using var repeatedDocument = JsonDocument.Parse(repeated.Output);
+        Assert.Equal(
+            "invalid_transition",
+            repeatedDocument.RootElement.GetProperty("error").GetProperty("code").GetString());
+    }
+
+    private static void ConcurrentClaimsByIdHaveOneWinner()
+    {
+        using var directory = new TestDirectory();
+        new QueueLayout(directory.Path).Create();
+        var record = new PaperqQueue(directory.Path).Add("claim this one");
+        var results = new ConcurrentBag<string>();
+        var tasks = Enumerable.Range(0, 2)
+            .Select(_ => Task.Run(() =>
+            {
+                try
+                {
+                    new PaperqQueue(directory.Path).Claim(record.Id);
+                    results.Add("success");
+                }
+                catch (PaperqException exception) when (exception.ExitCode == PaperqExitCode.Conflict)
+                {
+                    results.Add($"conflict:{exception.Code}");
+                }
+            }))
+            .ToArray();
+        Task.WaitAll(tasks);
+
+        Assert.Equal(1, results.Count(result => result == "success"));
+        Assert.Equal(1, results.Count(result => result.StartsWith("conflict:", StringComparison.Ordinal)));
+        Assert.False(File.Exists(record.FullPath));
+        Assert.True(File.Exists(new QueueLayout(directory.Path).RecordPath(QueueState.Working, record.Id)));
     }
 
     private static void LifecycleTransitions()

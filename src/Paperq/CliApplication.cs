@@ -57,6 +57,7 @@ internal static class CliApplication
             ListCommand command => ExecuteList(project, command, invocation.Json, io),
             ShowCommand command => ExecuteShow(project, command, invocation.Json, io),
             NextCommand command => ExecuteNext(project, command, invocation.Json, io),
+            ClaimCommand command => ExecuteClaim(project, command, invocation.Json, io),
             ResolveCommand command => ExecuteResolve(project, command, invocation.Json, io),
             BlockCommand command => ExecuteBlock(project, command, invocation.Json, io),
             ReopenCommand command => ExecuteReopen(project, command, invocation.Json, io),
@@ -258,6 +259,25 @@ internal static class CliApplication
         return (int)PaperqExitCode.Success;
     }
 
+    private static int ExecuteClaim(ProjectContext project, ClaimCommand command, bool json, CliIo io)
+    {
+        var queue = CreateQueue(project);
+        var record = queue.Claim(command.Id);
+        if (json)
+        {
+            WriteRecordSuccess(io, "claim", record, queue.Layout, writer =>
+                writer.WriteBoolean("claimed", true));
+        }
+        else
+        {
+            io.Output.WriteLine($"Claimed {record.Id}");
+            io.Output.WriteLine();
+            WriteRecordHuman(io.Output, record, queue.Layout);
+        }
+
+        return (int)PaperqExitCode.Success;
+    }
+
     private static int ExecuteResolve(ProjectContext project, ResolveCommand command, bool json, CliIo io)
     {
         var queue = CreateQueue(project);
@@ -450,6 +470,7 @@ internal static class CliApplication
               paperq list [--all]
               paperq show <id>
               paperq next [--claim]
+              paperq claim <id>
               paperq resolve <id> (--note <text> | --stdin)
               paperq block <id> (--reason <text> | --stdin)
               paperq reopen <id>
@@ -489,6 +510,12 @@ internal static class CliApplication
             Usage: paperq next [--claim]
 
             Selects the oldest open record. --claim atomically moves it to working.
+            """,
+        "claim" => """
+            Usage: paperq claim <id>
+
+            Atomically moves the selected open record to working. Use this only when a
+            specific papercut was explicitly selected instead of the oldest open record.
             """,
         "resolve" => """
             Usage: paperq resolve <id> (--note <text> | --stdin)

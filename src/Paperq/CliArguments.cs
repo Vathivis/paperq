@@ -39,6 +39,8 @@ internal sealed record ShowCommand(string Id) : CliCommand;
 
 internal sealed record NextCommand(bool Claim) : CliCommand;
 
+internal sealed record ClaimCommand(string Id) : CliCommand;
+
 internal sealed record ResolveCommand(string Id, string? Note, bool ReadStdin) : CliCommand;
 
 internal sealed record BlockCommand(string Id, string? Reason, bool ReadStdin) : CliCommand;
@@ -105,6 +107,7 @@ internal static class CliArguments
                 "list" => ParseList(arguments, ref index, globals),
                 "show" => ParseShow(arguments, ref index, globals),
                 "next" => ParseNext(arguments, ref index, globals),
+                "claim" => ParseClaim(arguments, ref index, globals),
                 "resolve" => ParseResolve(arguments, ref index, globals),
                 "block" => ParseBlock(arguments, ref index, globals),
                 "reopen" => ParseReopen(arguments, ref index, globals),
@@ -266,6 +269,12 @@ internal static class CliArguments
         ref int index,
         GlobalOptions globals) =>
         new ShowCommand(ParseId(arguments, ref index, globals, "show"));
+
+    private static CliCommand ParseClaim(
+        IReadOnlyList<string> arguments,
+        ref int index,
+        GlobalOptions globals) =>
+        new ClaimCommand(ParseId(arguments, ref index, globals, "claim"));
 
     private static CliCommand ParseResolve(
         IReadOnlyList<string> arguments,

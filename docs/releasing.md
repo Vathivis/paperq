@@ -23,7 +23,7 @@ The release workflow is tag-driven and accepts only `vMAJOR.MINOR.PATCH`. It als
 For example:
 
 ```powershell
-$version = "1.0.0"
+$version = "1.0.1"
 git tag -a "v$version" -m "paperq $version"
 git push origin "v$version"
 ```
@@ -68,7 +68,7 @@ foreach ($line in $checksumLines) {
 GitHub's cryptographic build-provenance attestation can also be verified with the GitHub CLI:
 
 ```powershell
-$version = "1.0.0"
+$version = "1.0.1"
 gh attestation verify ".\paperq-$version-win-x64.zip" --repo Vathivis/paperq
 ```
 
