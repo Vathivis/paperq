@@ -73,7 +73,7 @@ Without `--root`, `paperq` walks upward from the current directory to find the n
 
 ### Capture during normal work
 
-PaperQ's default agent workflow is deliberately one-way: when an agent encounters small, non-blocking friction, it records the papercut with `add` and immediately returns to its original task. The papercut remains `open`. A normal working agent does not claim, investigate, resolve, block, reopen, or delegate it unless the user or project-specific instructions explicitly request that behavior.
+PaperQ's default agent workflow is deliberately one-way: when an agent encounters small, non-blocking friction, it records the papercut with `add`, ends the papercut-capture side-track, and immediately returns to its original task. The papercut remains `open`. A normal working agent does not claim, investigate, resolve, block, reopen, or delegate it unless the user or project-specific instructions explicitly request that behavior.
 
 This keeps incidental friction from expanding the current task and preserves the queue for a later focused maintenance pass.
 
@@ -124,7 +124,7 @@ Paste this block into the repository's root `AGENTS.md`, or let `paperq init` ad
 <!-- paperq:agent-instructions:start -->
 ## Papercuts
 
-During normal work, record small, non-blocking friction with `paperq add "<concise message>"` or `paperq add --stdin` without resolving it, then continue the main task. Examples include dead-end tool calls, broken links, flaky commands, stale caches, confusing errors, and undocumented setup.
+During normal work, record small, non-blocking friction with `paperq add "<concise message>"` or `paperq add --stdin` without resolving it; after the record is added, end the papercut-capture side-track and continue the main task. Examples include dead-end tool calls, broken links, flaky commands, stale caches, confusing errors, and undocumented setup.
 
 Keep each papercut to one or two sentences. Include a suspected cause or fix only when useful. Never log secrets, credentials, full transcripts, or large raw output.
 

@@ -85,7 +85,7 @@ internal static class TestSuite
         var result = RunCli(directory.Path, ["init"]);
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("Paste-ready AGENTS.md instructions", result.Output);
-        Assert.Contains("without resolving it, then continue the main task", result.Output);
+        Assert.Contains("after the record is added, end the papercut-capture side-track and continue the main task", result.Output);
         Assert.Contains("When explicitly assigned papercut maintenance", result.Output);
         Assert.Contains("If `PAPERQ_RESOLUTIONS.md` exists", result.Output);
 
