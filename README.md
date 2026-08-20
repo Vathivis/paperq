@@ -51,6 +51,7 @@ paperq add --stdin
 paperq list [--all]
 paperq show <id>
 paperq next [--claim]
+paperq claim <id>
 paperq resolve <id> --note "evidence"
 paperq resolve <id> --stdin
 paperq block <id> --reason "reason"
@@ -91,6 +92,8 @@ When an agent is explicitly assigned papercut maintenance, it acts as the resolv
 
 Resolution notes and block reasons can be supplied inline or read from standard input with `--stdin`.
 
+When the user explicitly selects a specific item from `list`, use `paperq claim <id>` instead of `next --claim`. This opt-in path does not change the default oldest-first workflow.
+
 ### Optional parallel resolution
 
 PaperQ stores queue state; it does not launch models or agents. An environment that supports subagents may use separate user or project instructions to dispatch a resolver after `add` while the main agent continues its task. That external orchestration policy owns the resolver model, reasoning effort, permissions, concurrency, and write coordination.
@@ -100,6 +103,7 @@ PaperQ stores queue state; it does not launch models or agents. An environment t
 | `add` | Creates an `open` papercut. |
 | `next` | Previews the oldest open papercut without changing it. |
 | `next --claim` | Atomically moves the oldest open papercut to `working`. |
+| `claim <id>` | Atomically moves the selected open papercut to `working`. |
 | `show <id>` | Shows the full message and lifecycle history from any state. |
 | `resolve` | Moves a `working` papercut to `resolved` and updates the resolution journal. |
 | `block` | Moves a `working` papercut to `blocked`. |
@@ -128,7 +132,7 @@ During normal work, record small, non-blocking friction with `paperq add "<conci
 
 Keep each papercut to one or two sentences. Include a suspected cause or fix only when useful. Never log secrets, credentials, full transcripts, or large raw output.
 
-When explicitly assigned papercut maintenance, read `PAPERQ_RESOLUTIONS.md` if it exists, then process the queue one item at a time with `paperq list`, `paperq next --claim`, and `paperq show <id>`. Investigate the claimed item, use `paperq resolve <id> --note "<verified solution>"` when fixed or `paperq block <id> --reason "<reason>"` when it cannot proceed, then continue until no open papercuts remain.
+When explicitly assigned papercut maintenance, read `PAPERQ_RESOLUTIONS.md` if it exists, then process the queue one item at a time with `paperq list`, `paperq next --claim`, and `paperq show <id>`. When the user explicitly selects a specific papercut ID, use `paperq claim <id>` instead of the oldest-first `next --claim`. Investigate the claimed item, use `paperq resolve <id> --note "<verified solution>"` when fixed or `paperq block <id> --reason "<reason>"` when it cannot proceed, then continue until no open papercuts remain.
 <!-- paperq:agent-instructions:end -->
 
 <!-- paperq:resolutions-reference:start -->

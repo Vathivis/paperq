@@ -186,6 +186,80 @@ internal sealed class PaperqQueue
         }
     }
 
+    internal PapercutRecord Claim(string id)
+    {
+        Layout.RequireInitialized();
+        PapercutId.RequireValid(id);
+        var locations = FindLocations(id);
+        if (locations.Count == 0)
+        {
+            throw NotFound(id);
+        }
+
+        if (locations.Count > 1)
+        {
+            throw DuplicateRecord(id);
+        }
+
+        if (locations[0] != QueueState.Open)
+        {
+            throw new PaperqException(
+                "invalid_transition",
+                $"Papercut {id} is {locations[0].ToDirectoryName()}, not open.",
+                PaperqExitCode.Conflict);
+        }
+
+        var source = Layout.RecordPath(QueueState.Open, id);
+        var destination = Layout.RecordPath(QueueState.Working, id);
+        try
+        {
+            using var claimHandle = TextFile.OpenRecordForClaim(source);
+            if (File.Exists(destination))
+            {
+                throw DuplicateRecord(id);
+            }
+
+            var content = TextFile.ReadRecord(claimHandle, source);
+            var parsed = ParseAndVerify(content, source, id);
+            File.Move(source, destination, overwrite: false);
+            return new PapercutRecord(
+                id,
+                parsed.CreatedUtc,
+                parsed.Message,
+                parsed.History,
+                QueueState.Working,
+                destination);
+        }
+        catch (FileNotFoundException)
+        {
+            throw StateChanged(id);
+        }
+        catch (DirectoryNotFoundException) when (!File.Exists(source))
+        {
+            throw StateChanged(id);
+        }
+        catch (IOException) when (File.Exists(source) && File.Exists(destination))
+        {
+            throw DuplicateRecord(id);
+        }
+        catch (IOException exception) when (IsSharingViolation(exception))
+        {
+            throw new PaperqException(
+                "state_changed",
+                $"Papercut {id} is being changed concurrently; retry the command.",
+                PaperqExitCode.Conflict,
+                exception);
+        }
+        catch (IOException exception) when (!File.Exists(source))
+        {
+            throw new PaperqException(
+                "state_changed",
+                $"Papercut {id} changed state concurrently; retry the command.",
+                PaperqExitCode.Conflict,
+                exception);
+        }
+    }
+
     internal PapercutRecord Resolve(string id, string rawNote)
     {
         Layout.RequireInitialized();
