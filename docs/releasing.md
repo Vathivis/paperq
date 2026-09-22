@@ -28,7 +28,7 @@ git tag -a "v$version" -m "paperq $version"
 git push origin "v$version"
 ```
 
-The release workflow rebuilds and tests all four runtime targets. It creates x64 and ARM64 ZIPs for Windows, plus `tar.gz` and `.deb` packages for both Linux architectures, generates `SHA256SUMS`, creates GitHub artifact attestations, and creates the GitHub Release. It fails rather than replacing an existing release.
+The release workflow rebuilds and tests all four runtime targets. It creates Windows ZIPs, Linux `tar.gz` archives, and Linux `.deb` packages, generates `SHA256SUMS`, creates GitHub artifact attestations, and creates the GitHub Release. The x64 archive names end in `-x64-v3` to show that they require x86-64-v3. ARM64 releases require Armv8-A. The workflow fails rather than replacing an existing release.
 
 No workflow submits anything to the WinGet community repository. Submission remains a reviewed, manual step after testing the exact release asset in Windows Sandbox.
 
@@ -69,7 +69,7 @@ GitHub's cryptographic build-provenance attestation can also be verified with th
 
 ```powershell
 $version = "1.0.2"
-gh attestation verify ".\paperq-$version-win-x64.zip" --repo Vathivis/paperq
+gh attestation verify ".\paperq-$version-win-x64-v3.zip" --repo Vathivis/paperq
 ```
 
 An [artifact attestation](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations) proves which GitHub workflow, repository, commit, and event produced a file. It is not a Windows Authenticode signature and does not establish SmartScreen reputation.
@@ -106,10 +106,15 @@ The provider-specific action and identity settings are intentionally not present
 
 After a new release succeeds, copy the latest tracked manifest set under `winget-manifests/manifests/v/Vathivis/paperq/` into a directory named for the new version, then:
 
-1. update every `PackageVersion`, release-note URL, and Windows asset URL;
+1. update every `PackageVersion`, release-note URL, and Windows asset URL; the x64 URL must end in `win-x64-v3.zip`;
 2. set each `InstallerSha256` from the immutable published archive;
 3. preserve one portable installer entry per architecture and the nested executable name `paperq.exe`;
-4. validate the manifest and test installation, upgrade, invocation, and uninstall in Windows Sandbox;
-5. submit the reviewed manifest to `microsoft/winget-pkgs`.
+4. add this x64 requirement to `InstallationNotes`: `The x64 package requires an x86-64-v3 processor with AVX2, BMI1, and BMI2.` Keep the existing `paperq init` guidance after it;
+5. validate the manifest and test installation, upgrade, invocation, and uninstall in Windows Sandbox;
+6. submit the reviewed manifest to `microsoft/winget-pkgs`.
+
+WinGet has no manifest field for a minimum x64 instruction set. The `InstallationNotes` warning and the `-x64-v3` archive name make this requirement explicit, but WinGet cannot enforce it before launch.
+
+Do not add this requirement to an older manifest. Published manifests must continue to describe the exact assets for their original versions.
 
 Signing can be added before or after the first WinGet submission. If the executable changes from unsigned to signed, publish it as a new version because the release asset and its SHA-256 must remain immutable.

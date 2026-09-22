@@ -145,18 +145,23 @@ jobs:
           $source = Join-Path $PWD "artifacts/$rid/${{ matrix.executable }}"
           $releaseDirectory = Join-Path $PWD "release"
           $stagingDirectory = Join-Path $env:RUNNER_TEMP "paperq-package-$rid"
+          $assetRid = switch ($rid) {
+            "win-x64" { "win-x64-v3" }
+            "linux-x64" { "linux-x64-v3" }
+            default { $rid }
+          }
 
           New-Item -ItemType Directory -Path $releaseDirectory | Out-Null
           New-Item -ItemType Directory -Path $stagingDirectory | Out-Null
 
           if ("${{ matrix.archive }}" -eq "zip") {
-            $assetName = "paperq-$version-$rid.zip"
+            $assetName = "paperq-$version-$assetRid.zip"
             $stagedExecutable = Join-Path $stagingDirectory "paperq.exe"
             Copy-Item -LiteralPath $source -Destination $stagedExecutable
             Compress-Archive -LiteralPath $stagedExecutable -DestinationPath (Join-Path $releaseDirectory $assetName)
           }
           else {
-            $tarAssetName = "paperq-$version-$rid.tar.gz"
+            $tarAssetName = "paperq-$version-$assetRid.tar.gz"
             $stagedExecutable = Join-Path $stagingDirectory "paperq"
             Copy-Item -LiteralPath $source -Destination $stagedExecutable
             & chmod '+x' $stagedExecutable
@@ -216,9 +221,9 @@ jobs:
           $version = "${{ needs.validate.outputs.version }}"
           $expectedNames = @(
             "paperq-$version-linux-arm64.tar.gz"
-            "paperq-$version-linux-x64.tar.gz"
+            "paperq-$version-linux-x64-v3.tar.gz"
             "paperq-$version-win-arm64.zip"
-            "paperq-$version-win-x64.zip"
+            "paperq-$version-win-x64-v3.zip"
             "paperq_${version}_amd64.deb"
             "paperq_${version}_arm64.deb"
           )

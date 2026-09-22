@@ -68,6 +68,17 @@ install -D -m 0755 "$binary" "$package_root/usr/bin/paperq"
 install -D -m 0644 "$repository_root/README.md" "$package_root/usr/share/doc/paperq/README.md"
 install -D -m 0644 "$repository_root/LICENSE" "$package_root/usr/share/doc/paperq/copyright"
 
+package_summary="Repository-local papercut queue for coding agents"
+package_details=" paperq records small, non-blocking problems encountered during coding work in
+ transparent Markdown files kept inside the current repository."
+if [[ "$architecture" == "amd64" ]]; then
+  install -m 0755 "$repository_root/eng/debian-preinst-amd64" "$package_root/DEBIAN/preinst"
+  package_summary="$package_summary (x86-64-v3)"
+  package_details=" paperq requires an x86-64-v3 processor on amd64. It records small,
+ non-blocking problems encountered during coding work in transparent Markdown
+ files kept inside the current repository."
+fi
+
 # dpkg-shlibdeps derives the glibc floor from the published ELF binary. A
 # minimal source stanza gives the Debian helper the package context it expects.
 cat > "$build_root/debian/control" <<EOF
@@ -78,7 +89,7 @@ Maintainer: Vojtěch Humpl <vojtahumpl@seznam.cz>
 
 Package: paperq
 Architecture: any
-Description: Repository-local papercut queue for coding agents
+Description: $package_summary
 EOF
 
 dependency_output="$(
@@ -102,9 +113,8 @@ Maintainer: Vojtěch Humpl <vojtahumpl@seznam.cz>
 Installed-Size: $installed_size
 Depends: $dependencies
 Homepage: https://github.com/Vathivis/paperq
-Description: Repository-local papercut queue for coding agents
- paperq records small, non-blocking problems encountered during coding work in
- transparent Markdown files kept inside the current repository.
+Description: $package_summary
+$package_details
 EOF
 
 mkdir -p "$output_directory"
@@ -121,6 +131,17 @@ if [[ "$(dpkg-deb -f "$asset" Version)" != "$version" ]]; then
 fi
 if [[ "$(dpkg-deb -f "$asset" Architecture)" != "$architecture" ]]; then
   echo "Unexpected package architecture in $asset" >&2
+  exit 1
+fi
+control_check="$build_root/control-check"
+mkdir -p "$control_check"
+dpkg-deb --control "$asset" "$control_check"
+if [[ "$architecture" == "amd64" && ! -x "$control_check/preinst" ]]; then
+  echo "The amd64 package does not contain the executable x86-64-v3 pre-installation check." >&2
+  exit 1
+fi
+if [[ "$architecture" != "amd64" && -e "$control_check/preinst" ]]; then
+  echo "The $architecture package unexpectedly contains the amd64 CPU check." >&2
   exit 1
 fi
 package_contents="$(dpkg-deb --contents "$asset")"

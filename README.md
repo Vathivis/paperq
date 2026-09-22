@@ -6,6 +6,8 @@ The project targets .NET 10 and publishes as Native AOT executables.
 
 ## Installation
 
+Starting with paperq 1.0.2, x64 releases require an x86-64-v3 processor. This includes AVX2, BMI1, BMI2, F16C, FMA, LZCNT, and MOVBE. Their ZIP and `tar.gz` file names end in `-x64-v3`. ARM64 releases require Armv8-A.
+
 ### Windows
 
 `paperq` is available on WinGet:
@@ -23,7 +25,7 @@ sudo apt install ./paperq_*_amd64.deb   # x86-64
 sudo apt install ./paperq_*_arm64.deb   # ARM64
 ```
 
-The package installs the standalone executable as `/usr/bin/paperq`; it does not require a separate .NET runtime.
+The package installs the standalone executable as `/usr/bin/paperq`; it does not require a separate .NET runtime. The amd64 package checks for x86-64-v3 before installation and refuses to install on an unsupported CPU.
 
 ## Queue layout
 
