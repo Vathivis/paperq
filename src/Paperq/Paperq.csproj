@@ -9,7 +9,15 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <AnalysisLevel>latest</AnalysisLevel>
     <PublishAot>true</PublishAot>
-    <OptimizationPreference>Size</OptimizationPreference>
-    <Version>1.0.1</Version>
+    <OptimizationPreference>Speed</OptimizationPreference>
+    <Version>1.0.2</Version>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' == 'win-x64' Or '$(RuntimeIdentifier)' == 'linux-x64'">
+    <IlcInstructionSet>x86-64-v3</IlcInstructionSet>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' == 'win-arm64' Or '$(RuntimeIdentifier)' == 'linux-arm64'">
+    <IlcInstructionSet>armv8-a</IlcInstructionSet>
   </PropertyGroup>
 </Project>

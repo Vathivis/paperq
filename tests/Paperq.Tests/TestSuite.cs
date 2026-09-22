@@ -283,7 +283,7 @@ internal static class TestSuite
         var version = RunCli(directory.Path, ["--version", "--json"]);
         Assert.Equal(0, version.ExitCode);
         using var versionDocument = JsonDocument.Parse(version.Output);
-        Assert.Equal("1.0.1", versionDocument.RootElement.GetProperty("data").GetProperty("version").GetString());
+        Assert.Equal("1.0.2", versionDocument.RootElement.GetProperty("data").GetProperty("version").GetString());
     }
 
     private static void LifecyclePreconditionsAreConsistent()

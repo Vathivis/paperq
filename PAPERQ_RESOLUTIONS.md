@@ -213,3 +213,17 @@ A quote-heavy multiline PowerShell safety-check command was rejected by the shel
 ### Resolution
 
 Verified the workaround: the quote-heavy multiline PowerShell invocation was rejected before execution, while a simplified native script using straightforward double-quoted literals ran successfully and validated the intended temp path. Avoid nested quote constructs in tool-invoked PowerShell, or use a simpler script shape.
+
+<!-- paperq:resolution:20260820T183851181Z-bccc184dd4:b4bf12819cafcca9 -->
+## 20260820T183851181Z-bccc184dd4
+
+Recorded: 2026-08-20T20:00:21.4600535+00:00
+Papercut: [.papercuts/resolved/20260820T183851181Z-bccc184dd4.md](.papercuts/resolved/20260820T183851181Z-bccc184dd4.md)
+
+### Problem
+
+The paperq command was not available on PATH while capturing a papercut. Use the local project runner or document the required CLI setup.
+
+### Resolution
+
+Verified that paperq is installed at the WinGet Links path, paperq --version returns 1.0.0, and the installed command can read and update this repository queue.

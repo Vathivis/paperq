@@ -103,6 +103,7 @@ jobs:
           version="$(dotnet msbuild src/Paperq/Paperq.csproj --nologo -getProperty:Version)"
           package_directory="$RUNNER_TEMP/paperq-deb-${{ matrix.rid }}"
           extract_directory="$RUNNER_TEMP/paperq-deb-extract-${{ matrix.rid }}"
+          control_directory="$RUNNER_TEMP/paperq-deb-control-${{ matrix.rid }}"
 
           bash eng/package-deb.sh \
             "artifacts/${{ matrix.rid }}/paperq" \
@@ -114,6 +115,36 @@ jobs:
           packages=("$package_directory"/paperq_"$version"_*.deb)
           if [[ ${#packages[@]} -ne 1 ]]; then
             echo "Expected one Debian package but found ${#packages[@]}." >&2
+            exit 1
+          fi
+
+          mkdir -p "$control_directory"
+          dpkg-deb --control "${packages[0]}" "$control_directory"
+          if [[ "${{ matrix.rid }}" == "linux-x64" ]]; then
+            if [[ ! -x "$control_directory/preinst" ]]; then
+              echo "The amd64 package does not contain the executable x86-64-v3 pre-installation check." >&2
+              exit 1
+            fi
+
+            "$control_directory/preinst" install
+
+            unsupported_cpuinfo="$RUNNER_TEMP/paperq-cpuinfo-unsupported"
+            printf '%s\n' 'flags : fpu cx16 lahf_lm popcnt pni ssse3 sse4_1 sse4_2' > "$unsupported_cpuinfo"
+            if "$control_directory/preinst" --check-file "$unsupported_cpuinfo"; then
+              echo "The amd64 pre-installation check accepted a CPU without x86-64-v3 features." >&2
+              exit 1
+            fi
+
+            supported_cpuinfo="$RUNNER_TEMP/paperq-cpuinfo-v3"
+            printf '%s\n' 'flags : fpu cx16 lahf_lm popcnt pni ssse3 sse4_1 sse4_2 avx avx2 bmi1 bmi2 f16c fma movbe xsave abm' > "$supported_cpuinfo"
+            "$control_directory/preinst" --check-file "$supported_cpuinfo"
+
+            if ! dpkg-deb -f "${packages[0]}" Description | grep -q 'x86-64-v3'; then
+              echo "The amd64 package description does not state the CPU requirement." >&2
+              exit 1
+            fi
+          elif [[ -e "$control_directory/preinst" ]]; then
+            echo "The ARM64 package unexpectedly contains the amd64 CPU check." >&2
             exit 1
           fi
 
