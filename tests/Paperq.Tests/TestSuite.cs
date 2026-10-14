@@ -16,6 +16,8 @@ internal static partial class TestSuite
         ("add and JSON list preserve Markdown", AddAndList),
         ("show returns a full record and history", ShowReturnsFullRecord),
         ("input safety limits", InputSafetyLimits),
+        ("legacy record markers remain readable", LegacyRecordMarkersRemainReadable),
+        ("pruning large histories uses bounded memory", PruningLargeHistoriesUsesBoundedMemory),
         ("lifecycle text supports stdin", LifecycleTextSupportsStdin),
         ("global options are order-independent", GlobalOptionsAreOrderIndependent),
         ("lifecycle errors use consistent preconditions", LifecyclePreconditionsAreConsistent),

@@ -9,7 +9,7 @@ internal static class InputRules
 
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
 
-    internal static string Validate(string value, string label)
+    internal static string Validate(string value, string label, bool allowLegacyMarkers = false)
     {
         var normalized = NormalizeLineEndings(value).Trim();
         if (normalized.Length == 0)
@@ -22,7 +22,8 @@ internal static class InputRules
             throw PaperqException.InvalidInput($"The {label} cannot contain NUL characters.");
         }
 
-        if (normalized.Contains("<!-- paperq:", StringComparison.Ordinal))
+        var reservedMarker = allowLegacyMarkers ? RecordCodec.EventsMarker : "<!-- paperq:";
+        if (normalized.Contains(reservedMarker, StringComparison.Ordinal))
         {
             throw PaperqException.InvalidInput($"The {label} contains a reserved paperq marker.");
         }

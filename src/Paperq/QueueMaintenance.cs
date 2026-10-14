@@ -8,6 +8,8 @@ internal sealed record MaintenanceResult(
     IReadOnlyList<string> Ids, bool Applied, string? Mode, string? ArchivePath,
     int BeforeBytes, int AfterBytes, string Text);
 
+internal sealed record PruneRecord(string Id, QueueState State, string FullPath);
+
 internal static class QueueMaintenance
 {
     private const string TransactionDirectory = ".maintenance";
@@ -46,10 +48,16 @@ internal static class QueueMaintenance
         using var mutation = QueueMutation.Enter(queue.Layout, recover: apply);
         var reason = InputRules.Validate(rawReason, "reason");
         ValidateIds(ids);
-        var records = ids.Select(queue.Show).ToArray();
-        if (records.Any(record => record.State is not (QueueState.Open or QueueState.Resolved)))
+        var records = new List<PruneRecord>();
+        foreach (var id in ids)
         {
-            throw InvalidState("Pruning accepts only open or resolved records.");
+            var record = queue.Show(id);
+            if (record.State is not (QueueState.Open or QueueState.Resolved))
+            {
+                throw InvalidState("Pruning accepts only open or resolved records.");
+            }
+
+            records.Add(new PruneRecord(record.Id, record.State, record.FullPath));
         }
 
         using var journalLock = new ResolutionJournal(queue.Layout).AcquireLock();
@@ -60,23 +68,16 @@ internal static class QueueMaintenance
         if (apply)
         {
             var plan = new StringBuilder($"paperq-prune-v1\n{Hash(before)}\n{Hash(after)}\n");
-            var snapshots = new Dictionary<string, byte[]>(StringComparer.Ordinal);
-            foreach (var record in records)
-            {
-                var snapshot = TextFile.ReadRecordSnapshot(record.FullPath);
-                var parsed = RecordCodec.Parse(snapshot.Content, record.FullPath);
-                if (parsed.Id != record.Id)
-                {
-                    throw InvalidPending();
-                }
-
-                snapshots.Add(record.Id, snapshot.Bytes);
-                plan.Append($"{record.Id}\t{record.State.ToDirectoryName()}\t{HashBytes(snapshot.Bytes)}\n");
-            }
-
             if (archive)
             {
-                archivePath = WriteArchive(queue.Layout, records, snapshots, removed, reason);
+                archivePath = WriteArchive(queue.Layout, records, removed, reason, plan);
+            }
+            else
+            {
+                foreach (var record in records)
+                {
+                    CaptureRecord(record, plan);
+                }
             }
 
             var directory = Path.Combine(queue.Layout.QueueRoot, TransactionDirectory);
@@ -211,8 +212,21 @@ internal static class QueueMaintenance
         Directory.Delete(directory);
     }
 
-    private static string WriteArchive(QueueLayout layout, IReadOnlyList<PapercutRecord> records,
-        IReadOnlyDictionary<string, byte[]> snapshots, string journal, string reason)
+    private static byte[] CaptureRecord(PruneRecord record, StringBuilder plan)
+    {
+        var snapshot = TextFile.ReadRecordSnapshot(record.FullPath);
+        var parsed = RecordCodec.Parse(snapshot.Content, record.FullPath);
+        if (parsed.Id != record.Id)
+        {
+            throw InvalidPending();
+        }
+
+        plan.Append($"{record.Id}\t{record.State.ToDirectoryName()}\t{HashBytes(snapshot.Bytes)}\n");
+        return snapshot.Bytes;
+    }
+
+    private static string WriteArchive(QueueLayout layout, IReadOnlyList<PruneRecord> records,
+        string journal, string reason, StringBuilder plan)
     {
         var directory = Path.Combine(layout.QueueRoot, "archives");
         EnsureDirectory(directory);
@@ -228,7 +242,8 @@ internal static class QueueMaintenance
                 {
                     foreach (var record in records)
                     {
-                        AddZipEntry(zip, layout.RelativePath(record.State, record.Id), snapshots[record.Id], expected);
+                        var bytes = CaptureRecord(record, plan);
+                        AddZipEntry(zip, layout.RelativePath(record.State, record.Id), bytes, expected);
                     }
 
                     AddZipEntry(zip, QueueLayout.ResolutionJournalFileName, Encoding.UTF8.GetBytes(journal), expected);
