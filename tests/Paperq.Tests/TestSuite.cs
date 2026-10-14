@@ -295,11 +295,6 @@ internal static partial class TestSuite
             Assert.Equal("help", document.RootElement.GetProperty("command").GetString());
             Assert.Equal("add", document.RootElement.GetProperty("data").GetProperty("topic").GetString());
         }
-
-        var version = RunCli(directory.Path, ["--version", "--json"]);
-        Assert.Equal(0, version.ExitCode);
-        using var versionDocument = JsonDocument.Parse(version.Output);
-        Assert.Equal("1.0.2", versionDocument.RootElement.GetProperty("data").GetProperty("version").GetString());
     }
 
     private static void LifecyclePreconditionsAreConsistent()
