@@ -12,7 +12,7 @@ internal sealed class ResolutionJournal
 
     private static readonly TimeSpan LockTimeout = TimeSpan.FromSeconds(5);
 
-    private static readonly string Header = """
+    internal static readonly string Header = """
         <!-- paperq:resolutions -->
         # PaperQ Resolutions
 
@@ -70,7 +70,7 @@ internal sealed class ResolutionJournal
         return $"{EntryMarkerPrefix}{id}:{suffix} -->";
     }
 
-    private FileStream AcquireLock()
+    internal FileStream AcquireLock()
     {
         var stopwatch = Stopwatch.StartNew();
         IOException? lastException = null;

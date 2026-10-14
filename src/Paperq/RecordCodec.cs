@@ -72,7 +72,7 @@ internal static class RecordCodec
         var history = normalized[(historyStart + HistoryDelimiter.Length)..].Trim('\n');
         try
         {
-            message = InputRules.Validate(message, "record message");
+            message = InputRules.Validate(message, "record message", allowLegacyMarkers: true);
         }
         catch (PaperqException exception)
         {

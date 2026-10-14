@@ -4,7 +4,7 @@ using System.Text.Json;
 
 namespace Paperq.Tests;
 
-internal static class TestSuite
+internal static partial class TestSuite
 {
     private static readonly (string Name, Action Test)[] Tests =
     [
@@ -16,6 +16,8 @@ internal static class TestSuite
         ("add and JSON list preserve Markdown", AddAndList),
         ("show returns a full record and history", ShowReturnsFullRecord),
         ("input safety limits", InputSafetyLimits),
+        ("legacy record markers remain readable", LegacyRecordMarkersRemainReadable),
+        ("pruning large histories uses bounded memory", PruningLargeHistoriesUsesBoundedMemory),
         ("lifecycle text supports stdin", LifecycleTextSupportsStdin),
         ("global options are order-independent", GlobalOptionsAreOrderIndependent),
         ("lifecycle errors use consistent preconditions", LifecyclePreconditionsAreConsistent),
@@ -31,6 +33,20 @@ internal static class TestSuite
         ("resolve JSON identifies the resolution journal", ResolveJsonIdentifiesJournal),
         ("duplicate states are rejected", DuplicateStatesAreRejected),
         ("JSON errors stay on stdout", JsonErrorsStayOnStdout),
+        ("prune previews and fully deletes selected records", PruneDeletesSelectedRecords),
+        ("prune ZIP archives preserve records and resolutions", PruneArchivesSelectedRecords),
+        ("maintenance validates all selections before writing", MaintenanceValidatesSelections),
+        ("consolidation preserves history and resolve retries", ConsolidationPreservesHistory),
+        ("prune updates consolidated groups", PruneUpdatesConsolidatedGroups),
+        ("maintenance preserves custom and rejects ambiguous journals", MaintenancePreservesJournalText),
+        ("maintenance CLI options and stdin", MaintenanceCliOptions),
+        ("concurrent maintenance and resolutions preserve the journal", ConcurrentMaintenanceAndResolutions),
+        ("interrupted prune recovers without permanent backups", InterruptedPruneRecovers),
+        ("archive failures preserve the queue", ArchiveFailuresPreserveQueue),
+        ("archive preparation failures leave no permanent ZIP", ArchivePreparationFailuresLeaveNoZip),
+        ("prepared archives recover before deleting originals", PreparedArchivesRecover),
+        ("maintenance preserves unrelated CRLF entries and manual text", MaintenancePreservesFormatting),
+        ("maintenance works through the executable process", MaintenanceExecutableProcess),
     ];
 
     internal static int Run()

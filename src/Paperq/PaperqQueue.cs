@@ -29,6 +29,7 @@ internal sealed class PaperqQueue
 
     internal PapercutRecord Add(string rawMessage)
     {
+        using var mutation = QueueMutation.Enter(Layout);
         Layout.RequireInitialized();
         var message = InputRules.Validate(rawMessage, "message");
 
@@ -119,6 +120,7 @@ internal sealed class PaperqQueue
     internal PapercutRecord Next(bool claim)
     {
         Layout.RequireInitialized();
+        using var mutation = claim ? QueueMutation.Enter(Layout) : null;
         while (true)
         {
             var records = ReadState(QueueState.Open);
@@ -188,6 +190,7 @@ internal sealed class PaperqQueue
 
     internal PapercutRecord Claim(string id)
     {
+        using var mutation = QueueMutation.Enter(Layout);
         Layout.RequireInitialized();
         PapercutId.RequireValid(id);
         var locations = FindLocations(id);
@@ -262,6 +265,7 @@ internal sealed class PaperqQueue
 
     internal PapercutRecord Resolve(string id, string rawNote)
     {
+        using var mutation = QueueMutation.Enter(Layout);
         Layout.RequireInitialized();
         PapercutId.RequireValid(id);
         var note = InputRules.Validate(rawNote, "note");
@@ -276,6 +280,7 @@ internal sealed class PaperqQueue
 
     internal PapercutRecord Block(string id, string rawReason)
     {
+        using var mutation = QueueMutation.Enter(Layout);
         Layout.RequireInitialized();
         PapercutId.RequireValid(id);
         var reason = InputRules.Validate(rawReason, "reason");
@@ -284,6 +289,7 @@ internal sealed class PaperqQueue
 
     internal PapercutRecord Reopen(string id)
     {
+        using var mutation = QueueMutation.Enter(Layout);
         Layout.RequireInitialized();
         PapercutId.RequireValid(id);
         var locations = FindLocations(id);

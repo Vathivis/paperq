@@ -47,6 +47,10 @@ internal sealed record BlockCommand(string Id, string? Reason, bool ReadStdin) :
 
 internal sealed record ReopenCommand(string Id) : CliCommand;
 
+internal sealed record PruneCommand(IReadOnlyList<string> Ids, bool Archive, string? Reason, bool ReadStdin, bool Apply) : CliCommand;
+
+internal sealed record ConsolidateCommand(IReadOnlyList<string> Ids, string? Note, bool ReadStdin, bool Apply) : CliCommand;
+
 internal static class CliArguments
 {
     internal static CliInvocation Parse(IReadOnlyList<string> arguments)
@@ -111,6 +115,8 @@ internal static class CliArguments
                 "resolve" => ParseResolve(arguments, ref index, globals),
                 "block" => ParseBlock(arguments, ref index, globals),
                 "reopen" => ParseReopen(arguments, ref index, globals),
+                "prune" => ParseMaintenance(arguments, ref index, globals, "prune"),
+                "consolidate" => ParseMaintenance(arguments, ref index, globals, "consolidate"),
                 _ => throw PaperqException.Usage($"Unknown command: {commandName}"),
             };
         }
@@ -418,6 +424,103 @@ internal static class CliArguments
         }
 
         return (id, value, stdin);
+    }
+
+    private static CliCommand ParseMaintenance(
+        IReadOnlyList<string> arguments, ref int index, GlobalOptions globals, string commandName)
+    {
+        var ids = new List<string>();
+        string? value = null;
+        bool? archive = null;
+        var stdin = false;
+        var apply = false;
+        var literal = false;
+        var option = commandName == "prune" ? "--reason" : "--note";
+        while (index < arguments.Count)
+        {
+            if (!literal && arguments[index] == "--")
+            {
+                literal = true;
+                index++;
+                continue;
+            }
+
+            if (!literal && arguments[index] is "--help" or "-h")
+            {
+                throw new HelpRequestedException(commandName);
+            }
+
+            if (!literal && TryConsumeGlobal(arguments, ref index, globals))
+            {
+                continue;
+            }
+
+            if (!literal && TryConsumeValueOption(arguments, ref index, option, out var text))
+            {
+                if (value is not null)
+                {
+                    throw PaperqException.Usage($"{option} can only be supplied once.");
+                }
+
+                value = text;
+                continue;
+            }
+
+            if (!literal && arguments[index] == "--stdin")
+            {
+                if (stdin)
+                {
+                    throw PaperqException.Usage("--stdin can only be supplied once.");
+                }
+
+                stdin = true;
+                index++;
+                continue;
+            }
+
+            if (!literal && arguments[index] == "--apply")
+            {
+                if (apply)
+                {
+                    throw PaperqException.Usage("--apply can only be supplied once.");
+                }
+
+                apply = true;
+                index++;
+                continue;
+            }
+
+            if (!literal && commandName == "prune" && arguments[index] is "--delete" or "--archive")
+            {
+                if (archive.HasValue)
+                {
+                    throw PaperqException.Usage("Select exactly one of --delete or --archive.");
+                }
+
+                archive = arguments[index++] == "--archive";
+                continue;
+            }
+
+            if (!literal && arguments[index].StartsWith("-", StringComparison.Ordinal))
+            {
+                throw PaperqException.Usage($"Unknown {commandName} option: {arguments[index]}");
+            }
+
+            ids.Add(arguments[index++]);
+        }
+
+        var minimum = commandName == "consolidate" ? 2 : 1;
+        if (ids.Count < minimum || ids.Count > 256 || ids.Distinct(StringComparer.Ordinal).Count() != ids.Count ||
+            stdin == (value is not null) || (commandName == "prune" && !archive.HasValue))
+        {
+            throw PaperqException.Usage(commandName == "prune"
+                ? "Usage: paperq prune <id>... (--delete | --archive) (--reason <text> | --stdin) [--apply]"
+                : "Usage: paperq consolidate <id> <id>... (--note <text> | --stdin) [--apply]");
+        }
+
+        return commandName == "prune"
+            ? new PruneCommand(ids, archive!.Value, value, stdin, apply)
+            : new ConsolidateCommand(ids, value, stdin, apply);
     }
 
     private static bool TryConsumeValueOption(

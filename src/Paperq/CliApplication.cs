@@ -61,6 +61,8 @@ internal static class CliApplication
             ResolveCommand command => ExecuteResolve(project, command, invocation.Json, io),
             BlockCommand command => ExecuteBlock(project, command, invocation.Json, io),
             ReopenCommand command => ExecuteReopen(project, command, invocation.Json, io),
+            PruneCommand command => ExecutePrune(project, command, invocation.Json, io),
+            ConsolidateCommand command => ExecuteConsolidate(project, command, invocation.Json, io),
             _ => throw new InvalidOperationException("Unsupported command."),
         };
     }
@@ -320,6 +322,70 @@ internal static class CliApplication
         return WriteTransitionResult(io, json, "reopen", "Reopened", record, queue.Layout);
     }
 
+    private static int ExecutePrune(ProjectContext project, PruneCommand command, bool json, CliIo io)
+    {
+        var queue = CreateQueue(project);
+        queue.Layout.RequireInitialized();
+        var reason = command.ReadStdin ? InputRules.ReadBounded(io.Input, "reason") : command.Reason!;
+        var result = QueueMaintenance.Prune(queue, command.Ids, reason, command.Archive, command.Apply);
+        return WriteMaintenanceResult(io, json, "prune", result);
+    }
+
+    private static int ExecuteConsolidate(ProjectContext project, ConsolidateCommand command, bool json, CliIo io)
+    {
+        var queue = CreateQueue(project);
+        queue.Layout.RequireInitialized();
+        var note = command.ReadStdin ? InputRules.ReadBounded(io.Input, "note") : command.Note!;
+        var result = QueueMaintenance.Consolidate(queue, command.Ids, note, command.Apply);
+        return WriteMaintenanceResult(io, json, "consolidate", result);
+    }
+
+    private static int WriteMaintenanceResult(CliIo io, bool json, string command, MaintenanceResult result)
+    {
+        if (json)
+        {
+            io.Output.WriteLine(JsonOutput.Success(command, writer =>
+            {
+                writer.WriteBoolean("applied", result.Applied);
+                writer.WriteString("mode", result.Mode);
+                writer.WriteString("archivePath", result.ArchivePath);
+                writer.WriteNumber("beforeBytes", result.BeforeBytes);
+                writer.WriteNumber("afterBytes", result.AfterBytes);
+                writer.WriteString(command == "prune" ? "reason" : "note", result.Text);
+                writer.WriteStartArray("ids");
+                foreach (var id in result.Ids)
+                {
+                    writer.WriteStringValue(id);
+                }
+
+                writer.WriteEndArray();
+                writer.WriteNumber("count", result.Ids.Count);
+            }));
+        }
+        else
+        {
+            io.Output.WriteLine($"{(result.Applied ? "Applied" : "Preview")}: {command} {result.Ids.Count} record(s){(result.Mode is null ? "" : $" ({result.Mode})")}.");
+            foreach (var id in result.Ids)
+            {
+                io.Output.WriteLine(id);
+            }
+
+            io.Output.WriteLine($"Journal bytes: {result.BeforeBytes} -> {result.AfterBytes}");
+            io.Output.WriteLine($"{(command == "prune" ? "Reason" : "Summary")}: {result.Text}");
+            if (result.ArchivePath is not null)
+            {
+                io.Output.WriteLine($"ZIP archive: {result.ArchivePath}");
+            }
+
+            if (!result.Applied)
+            {
+                io.Output.WriteLine("No records or journal entries were changed. Add --apply to save this operation.");
+            }
+        }
+
+        return (int)PaperqExitCode.Success;
+    }
+
     private static int ExecuteHelp(HelpCommand command, bool json, CliIo io)
     {
         var text = HelpText(command.Topic);
@@ -474,6 +540,8 @@ internal static class CliApplication
               paperq resolve <id> (--note <text> | --stdin)
               paperq block <id> (--reason <text> | --stdin)
               paperq reopen <id>
+              paperq prune <id>... (--delete | --archive) (--reason <text> | --stdin) [--apply]
+              paperq consolidate <id> <id>... (--note <text> | --stdin) [--apply]
 
             Global options:
               --root <path>  Use this exact directory instead of Git-root discovery.
@@ -525,6 +593,21 @@ internal static class CliApplication
             """,
         "block" => "Usage: paperq block <id> (--reason <text> | --stdin)",
         "reopen" => "Usage: paperq reopen <id>",
+        "prune" => """
+            Usage: paperq prune <id>... (--delete | --archive) (--reason <text> | --stdin) [--apply]
+
+            Previews removal of selected open or resolved records and their journal entries.
+            --apply saves the operation. --delete removes the data without a backup.
+            --archive first writes and verifies one compressed ZIP under .papercuts/archives.
+            Working and blocked records are rejected. Select up to 256 distinct IDs.
+            """,
+        "consolidate" => """
+            Usage: paperq consolidate <id> <id>... (--note <text> | --stdin) [--apply]
+
+            Previews replacement of selected resolutions with one supplied summary.
+            --apply saves the operation. Detailed records and retry markers are preserved.
+            Select 2 to 256 distinct resolved IDs. Existing groups must be selected in full.
+            """,
         _ => throw PaperqException.Usage($"Unknown help topic: {topic}"),
     };
 }
