@@ -16,6 +16,8 @@ internal static class QueueMaintenance
     private const string PlanFile = "prune.pending";
     private const string JournalFile = "journal.next";
     private const string PreparedPlanFile = "prune.prepare";
+    private const string ArchiveFile = "archive.next";
+    private const string ArchiveInfoFile = "archive.info";
 
     internal static MaintenanceResult Consolidate(PaperqQueue queue, IReadOnlyList<string> ids, string rawNote, bool apply)
     {
@@ -68,25 +70,37 @@ internal static class QueueMaintenance
         if (apply)
         {
             var plan = new StringBuilder($"paperq-prune-v1\n{Hash(before)}\n{Hash(after)}\n");
-            if (archive)
-            {
-                archivePath = WriteArchive(queue.Layout, records, removed, reason, plan);
-            }
-            else
-            {
-                foreach (var record in records)
-                {
-                    CaptureRecord(record, plan);
-                }
-            }
-
             var directory = Path.Combine(queue.Layout.QueueRoot, TransactionDirectory);
             EnsureDirectory(directory);
-            TextFile.CreateNew(Path.Combine(directory, JournalFile), after);
-            // Publish the plan last. After this point recovery completes this operation.
-            TextFile.CreateNew(Path.Combine(directory, PreparedPlanFile), plan.ToString());
-            File.Move(Path.Combine(directory, PreparedPlanFile), Path.Combine(directory, PlanFile), overwrite: false);
-            CompletePrune(queue.Layout, directory);
+            try
+            {
+                if (archive)
+                {
+                    archivePath = WriteArchive(queue.Layout, records, removed, reason, plan, directory);
+                }
+                else
+                {
+                    foreach (var record in records)
+                    {
+                        CaptureRecord(record, plan);
+                    }
+                }
+
+                TextFile.CreateNew(Path.Combine(directory, JournalFile), after);
+                // Publish the plan last. After this point recovery completes this operation.
+                TextFile.CreateNew(Path.Combine(directory, PreparedPlanFile), plan.ToString());
+                File.Move(Path.Combine(directory, PreparedPlanFile), Path.Combine(directory, PlanFile), overwrite: false);
+                CompletePrune(queue.Layout, directory);
+            }
+            catch
+            {
+                if (!File.Exists(Path.Combine(directory, PlanFile)))
+                {
+                    CleanStaging(directory);
+                }
+
+                throw;
+            }
         }
 
         return Result(ids, apply, archive ? "archive" : "delete", archivePath, before, after, reason);
@@ -106,7 +120,7 @@ internal static class QueueMaintenance
         }
 
         EnsureDirectory(directory);
-        var knownFiles = new[] { PlanFile, JournalFile, PreparedPlanFile };
+        var knownFiles = new[] { PlanFile, JournalFile, PreparedPlanFile, ArchiveFile, ArchiveInfoFile };
         if (Directory.EnumerateFileSystemEntries(directory).Any(path => !knownFiles.Contains(Path.GetFileName(path), StringComparer.Ordinal)))
         {
             throw InvalidPending();
@@ -120,9 +134,7 @@ internal static class QueueMaintenance
         else
         {
             // A prepare interrupted before publishing the plan made no queue changes.
-            TextFile.DeleteManaged(Path.Combine(directory, JournalFile));
-            TextFile.DeleteManaged(Path.Combine(directory, PreparedPlanFile));
-            Directory.Delete(directory);
+            CleanStaging(directory);
         }
     }
 
@@ -189,6 +201,7 @@ internal static class QueueMaintenance
             }
         }
 
+        PublishArchive(layout, directory);
         if (before != after)
         {
             if (after.Length == 0)
@@ -208,8 +221,67 @@ internal static class QueueMaintenance
 
         // Delete the plan first: orphan staging files can then be cleaned safely.
         TextFile.DeleteManaged(Path.Combine(directory, PlanFile));
-        TextFile.DeleteManaged(Path.Combine(directory, JournalFile));
+        CleanStaging(directory);
+    }
+
+    private static void CleanStaging(string directory)
+    {
+        foreach (var name in new[] { JournalFile, PreparedPlanFile, ArchiveFile, ArchiveInfoFile })
+        {
+            TextFile.DeleteManaged(Path.Combine(directory, name));
+        }
+
         Directory.Delete(directory);
+    }
+
+    private static void PublishArchive(QueueLayout layout, string directory)
+    {
+        var infoPath = Path.Combine(directory, ArchiveInfoFile);
+        var source = Path.Combine(directory, ArchiveFile);
+        if (!File.Exists(infoPath))
+        {
+            if (File.Exists(source) || new FileInfo(infoPath).LinkTarget is not null)
+            {
+                throw InvalidPending();
+            }
+
+            return;
+        }
+
+        var info = TextFile.ReadManaged(infoPath, 1024).Split('\n');
+        if (info.Length != 3 || info[2].Length != 0 || !info[0].EndsWith(".zip", StringComparison.Ordinal) ||
+            !PapercutId.IsValid(info[0][..^4]) || !IsHash(info[1]))
+        {
+            throw InvalidPending();
+        }
+
+        var archives = Path.Combine(layout.QueueRoot, "archives");
+        EnsureDirectory(archives);
+        var destination = Path.Combine(archives, info[0]);
+        if (File.Exists(source))
+        {
+            if (File.Exists(destination) || HashArchive(source) != info[1])
+            {
+                throw InvalidPending();
+            }
+
+            File.Move(source, destination, overwrite: false);
+        }
+        else if (!File.Exists(destination) || new FileInfo(source).LinkTarget is not null || HashArchive(destination) != info[1])
+        {
+            throw InvalidPending();
+        }
+    }
+
+    private static string HashArchive(string path)
+    {
+        if (new FileInfo(path).LinkTarget is not null)
+        {
+            throw InvalidPending();
+        }
+
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        return Convert.ToHexString(SHA256.HashData(stream));
     }
 
     private static byte[] CaptureRecord(PruneRecord record, StringBuilder plan)
@@ -226,13 +298,12 @@ internal static class QueueMaintenance
     }
 
     private static string WriteArchive(QueueLayout layout, IReadOnlyList<PruneRecord> records,
-        string journal, string reason, StringBuilder plan)
+        string journal, string reason, StringBuilder plan, string stagingDirectory)
     {
         var directory = Path.Combine(layout.QueueRoot, "archives");
         EnsureDirectory(directory);
         var name = PapercutId.Create(DateTimeOffset.UtcNow) + ".zip";
-        var path = Path.Combine(directory, name);
-        var temporary = path + ".tmp";
+        var temporary = Path.Combine(stagingDirectory, ArchiveFile);
         var expected = new Dictionary<string, string>(StringComparer.Ordinal);
         try
         {
@@ -278,11 +349,12 @@ internal static class QueueMaintenance
                 }
             }
 
-            File.Move(temporary, path, overwrite: false);
+            TextFile.CreateNew(Path.Combine(stagingDirectory, ArchiveInfoFile), $"{name}\n{HashArchive(temporary)}\n");
         }
-        finally
+        catch
         {
-            File.Delete(temporary);
+            TextFile.DeleteManaged(temporary);
+            throw;
         }
 
         return $".papercuts/archives/{name}";

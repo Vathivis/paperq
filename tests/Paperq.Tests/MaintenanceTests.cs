@@ -1,5 +1,7 @@
 using System.IO.Compression;
 using System.Diagnostics;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text.Json;
 
 namespace Paperq.Tests;
@@ -264,6 +266,8 @@ internal static partial class TestSuite
         Directory.CreateDirectory(transaction);
         File.WriteAllText(Path.Combine(transaction, "journal.next"), "incomplete prepare");
         File.WriteAllText(Path.Combine(transaction, "prune.prepare"), "partial plan");
+        File.WriteAllText(Path.Combine(transaction, "archive.next"), "partial ZIP");
+        File.WriteAllText(Path.Combine(transaction, "archive.info"), "partial metadata");
         queue.Add("clean incomplete prepare");
         Assert.False(Directory.Exists(transaction));
         Assert.Equal(2, queue.List(includeResolved: true).Count);
@@ -283,6 +287,87 @@ internal static partial class TestSuite
         Assert.True(before.SequenceEqual(File.ReadAllBytes(queue.Layout.ResolutionJournalPath)));
         Assert.Equal("unrelated file", File.ReadAllText(conflict));
         Assert.False(Directory.Exists(Path.Combine(queue.Layout.QueueRoot, ".maintenance")));
+    }
+
+    private static void ArchivePreparationFailuresLeaveNoZip()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var directory = new TestDirectory();
+        new QueueLayout(directory.Path).Create();
+        var queue = new PaperqQueue(directory.Path);
+        var record = AddResolved(queue, "keep original", "keep original note");
+        var before = File.ReadAllBytes(queue.Layout.ResolutionJournalPath);
+        var archives = Path.Combine(queue.Layout.QueueRoot, "archives");
+        Directory.CreateDirectory(archives);
+        var root = new DirectoryInfo(queue.Layout.QueueRoot);
+        var original = root.GetAccessControl();
+        var denied = root.GetAccessControl();
+        using var identity = WindowsIdentity.GetCurrent();
+        denied.AddAccessRule(new FileSystemAccessRule(identity.User!, FileSystemRights.CreateDirectories,
+            InheritanceFlags.None, PropagationFlags.None, AccessControlType.Deny));
+        try
+        {
+            root.SetAccessControl(denied);
+            var result = RunCli(directory.Path, ["prune", record.Id, "--archive", "--reason", "obsolete", "--apply"]);
+            Assert.Equal(1, result.ExitCode);
+            Assert.True(File.Exists(record.FullPath));
+            Assert.True(before.SequenceEqual(File.ReadAllBytes(queue.Layout.ResolutionJournalPath)));
+            Assert.Equal(0, Directory.GetFiles(archives).Length);
+        }
+        finally
+        {
+            original.SetSecurityDescriptorBinaryForm(original.GetSecurityDescriptorBinaryForm(), AccessControlSections.Access);
+            root.SetAccessControl(original);
+        }
+    }
+
+    private static void PreparedArchivesRecover()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var directory = new TestDirectory();
+        new QueueLayout(directory.Path).Create();
+        var queue = new PaperqQueue(directory.Path);
+        var record = AddResolved(queue, "keep until archived", "verified note");
+        var bytes = File.ReadAllBytes(record.FullPath);
+        var before = File.ReadAllBytes(queue.Layout.ResolutionJournalPath);
+        var archives = new DirectoryInfo(Path.Combine(queue.Layout.QueueRoot, "archives"));
+        archives.Create();
+        var original = archives.GetAccessControl();
+        var denied = archives.GetAccessControl();
+        using var identity = WindowsIdentity.GetCurrent();
+        denied.AddAccessRule(new FileSystemAccessRule(identity.User!, FileSystemRights.CreateFiles,
+            InheritanceFlags.None, PropagationFlags.None, AccessControlType.Deny));
+        try
+        {
+            archives.SetAccessControl(denied);
+            Assert.Equal(1, RunCli(directory.Path, ["prune", record.Id, "--archive", "--reason", "retired", "--apply"]).ExitCode);
+            Assert.True(File.Exists(record.FullPath));
+            Assert.True(before.SequenceEqual(File.ReadAllBytes(queue.Layout.ResolutionJournalPath)));
+            Assert.Equal(0, archives.GetFiles().Length);
+            Assert.True(File.Exists(Path.Combine(queue.Layout.QueueRoot, ".maintenance", "prune.pending")));
+        }
+        finally
+        {
+            original.SetSecurityDescriptorBinaryForm(original.GetSecurityDescriptorBinaryForm(), AccessControlSections.Access);
+            archives.SetAccessControl(original);
+        }
+
+        queue.Add("resume after restoring access");
+        Assert.False(File.Exists(record.FullPath));
+        Assert.False(Directory.Exists(Path.Combine(queue.Layout.QueueRoot, ".maintenance")));
+        using var zip = ZipFile.OpenRead(archives.GetFiles("*.zip").Single().FullName);
+        using var source = zip.GetEntry(queue.Layout.RelativePath(QueueState.Resolved, record.Id))!.Open();
+        using var recovered = new MemoryStream();
+        source.CopyTo(recovered);
+        Assert.True(bytes.SequenceEqual(recovered.ToArray()));
     }
 
     private static void MaintenancePreservesFormatting()

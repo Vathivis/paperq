@@ -43,6 +43,8 @@ internal static partial class TestSuite
         ("concurrent maintenance and resolutions preserve the journal", ConcurrentMaintenanceAndResolutions),
         ("interrupted prune recovers without permanent backups", InterruptedPruneRecovers),
         ("archive failures preserve the queue", ArchiveFailuresPreserveQueue),
+        ("archive preparation failures leave no permanent ZIP", ArchivePreparationFailuresLeaveNoZip),
+        ("prepared archives recover before deleting originals", PreparedArchivesRecover),
         ("maintenance preserves unrelated CRLF entries and manual text", MaintenancePreservesFormatting),
         ("maintenance works through the executable process", MaintenanceExecutableProcess),
     ];
