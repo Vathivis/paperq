@@ -4,7 +4,7 @@ using System.Text.Json;
 
 namespace Paperq.Tests;
 
-internal static class TestSuite
+internal static partial class TestSuite
 {
     private static readonly (string Name, Action Test)[] Tests =
     [
@@ -31,6 +31,18 @@ internal static class TestSuite
         ("resolve JSON identifies the resolution journal", ResolveJsonIdentifiesJournal),
         ("duplicate states are rejected", DuplicateStatesAreRejected),
         ("JSON errors stay on stdout", JsonErrorsStayOnStdout),
+        ("prune previews and fully deletes selected records", PruneDeletesSelectedRecords),
+        ("prune ZIP archives preserve records and resolutions", PruneArchivesSelectedRecords),
+        ("maintenance validates all selections before writing", MaintenanceValidatesSelections),
+        ("consolidation preserves history and resolve retries", ConsolidationPreservesHistory),
+        ("prune updates consolidated groups", PruneUpdatesConsolidatedGroups),
+        ("maintenance preserves custom and rejects ambiguous journals", MaintenancePreservesJournalText),
+        ("maintenance CLI options and stdin", MaintenanceCliOptions),
+        ("concurrent maintenance and resolutions preserve the journal", ConcurrentMaintenanceAndResolutions),
+        ("interrupted prune recovers without permanent backups", InterruptedPruneRecovers),
+        ("archive failures preserve the queue", ArchiveFailuresPreserveQueue),
+        ("maintenance preserves unrelated CRLF entries and manual text", MaintenancePreservesFormatting),
+        ("maintenance works through the executable process", MaintenanceExecutableProcess),
     ];
 
     internal static int Run()

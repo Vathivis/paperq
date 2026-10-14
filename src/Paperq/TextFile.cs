@@ -53,6 +53,28 @@ internal static class TextFile
         }
     }
 
+    internal static (string Content, byte[] Bytes) ReadRecordSnapshot(string path)
+    {
+        EnsureNotSymbolicLink(path);
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        if (stream.Length > InputRules.MaxRecordBytes)
+        {
+            throw PaperqException.InvalidInput($"Record exceeds the {InputRules.MaxRecordBytes}-byte safety limit: {path}");
+        }
+
+        var bytes = new byte[(int)stream.Length];
+        stream.ReadExactly(bytes);
+        using var snapshot = new MemoryStream(bytes, writable: false);
+        try
+        {
+            return (ReadUtf8(snapshot, path, InputRules.MaxRecordBytes), bytes);
+        }
+        catch (DecoderFallbackException exception)
+        {
+            throw InvalidUtf8(path, exception);
+        }
+    }
+
     internal static FileStream OpenRecordForClaim(string path)
     {
         EnsureNotSymbolicLink(path);
@@ -190,6 +212,48 @@ internal static class TextFile
             FileOptions.None);
     }
 
+    internal static string ReadManaged(string path, int maximumBytes)
+    {
+        EnsureNotSymbolicLink(path);
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        try
+        {
+            return ReadUtf8(stream, path, maximumBytes);
+        }
+        catch (DecoderFallbackException exception)
+        {
+            throw InvalidUtf8(path, exception);
+        }
+    }
+
+    internal static void Replace(string path, string content, int maximumBytes)
+    {
+        EnsureNotSymbolicLink(path);
+        var bytes = StrictUtf8.GetBytes(content);
+        if (bytes.Length > maximumBytes)
+        {
+            throw PaperqException.InvalidInput($"Updating {path} would exceed the {maximumBytes}-byte safety limit.");
+        }
+
+        var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            CreateNew(temporary, content);
+            EnsureNotSymbolicLink(path);
+            File.Move(temporary, path, overwrite: true);
+        }
+        finally
+        {
+            File.Delete(temporary);
+        }
+    }
+
+    internal static void DeleteManaged(string path)
+    {
+        EnsureNotSymbolicLink(path);
+        File.Delete(path);
+    }
+
     internal static bool AppendGitIgnoreRule(string path, string rule)
     {
         EnsureNotSymbolicLink(path);
@@ -268,7 +332,7 @@ internal static class TextFile
         }
     }
 
-    private static string ReadUtf8(FileStream stream, string path, int maximumBytes)
+    private static string ReadUtf8(Stream stream, string path, int maximumBytes)
     {
         if (stream.Length > maximumBytes)
         {

@@ -59,6 +59,9 @@ paperq resolve <id> --stdin
 paperq block <id> --reason "reason"
 paperq block <id> --stdin
 paperq reopen <id>
+paperq prune <id>... --delete --reason "outdated" [--apply]
+paperq prune <id>... --archive --reason "outdated" [--apply]
+paperq consolidate <id> <id>... --note "shared solution" [--apply]
 ```
 
 Every command accepts these global options:
@@ -96,6 +99,35 @@ Resolution notes and block reasons can be supplied inline or read from standard 
 
 When the user explicitly selects a specific item from `list`, use `paperq claim <id>` instead of `next --claim`. This opt-in path does not change the default oldest-first workflow.
 
+### Pruning and consolidation
+
+Both maintenance commands preview their changes by default. They list the selected IDs, the reason or summary, and the journal size before and after the operation. Add `--apply` to save the change. They accept the global `--root` and `--json` options. Select at most 256 distinct IDs per command.
+
+Pruning requires an explicit choice:
+
+```text
+paperq prune <id>... --delete --reason "no longer applicable" --apply
+paperq prune <id>... --archive --reason "superseded" --apply
+```
+
+Only open and resolved records can be pruned. Working and blocked records are rejected. All selected records are checked before any removal. Both modes remove the selected record files and every journal entry belonging to those IDs, including entries from earlier resolve/reopen cycles. `--delete` leaves no per-item backup or retry marker. A later `show`, `resolve`, or repeated `prune` for a removed ID returns `not_found`.
+
+`--archive` first writes one compressed ZIP file under `.papercuts/archives/` and verifies its contents before removing the source files. The ZIP contains the original record bytes at their relative paths, the removed journal entries in `PAPERQ_RESOLUTIONS.md`, and a `prune.txt` file with the reason and time. Archived records are outside the active queue; extract the ZIP to inspect them. No uncompressed archive copies are retained. Archive mode only saves space when the compressed data is smaller than the source files.
+
+Consolidation replaces selected resolutions with one summary supplied by the user or agent:
+
+```text
+paperq consolidate <id> <id>... --note "Shared problem and verified solution." --apply
+```
+
+Select at least two resolved IDs. PaperQ does not infer similarity or write the summary. It retains links to the source records, their full lifecycle histories, and compact markers that prevent resolve retries from restoring the old text. Select all source IDs when combining an existing consolidated group with other resolutions. Pruning part of a consolidated group removes those IDs and their markers; the shared summary remains until the final source ID is pruned.
+
+Use `--stdin` instead of `--reason` or `--note` for multiline text. These commands are separate from the normal capture workflow and run only when maintenance is requested.
+
+Journal rewrites preserve unrelated entries and text outside managed entries. Legacy entries have no end marker, so an ambiguous manual suffix causes the operation to fail without a rewrite. Consolidated groups have explicit end markers. Malformed journals are rejected.
+
+Queue mutations share a local lock. Pruning uses temporary files under `.papercuts/.maintenance` so the next mutating command can complete an interrupted operation. A preview refuses to perform recovery. Successful pruning removes its temporary files. If recovery detects a changed record or journal, it stops with `maintenance_conflict` and preserves the temporary files for inspection. These guarantees cover cooperating PaperQ processes on one local filesystem.
+
 ### Optional parallel resolution
 
 PaperQ stores queue state; it does not launch models or agents. An environment that supports subagents may use separate user or project instructions to dispatch a resolver after `add` while the main agent continues its task. That external orchestration policy owns the resolver model, reasoning effort, permissions, concurrency, and write coordination.
@@ -110,6 +142,8 @@ PaperQ stores queue state; it does not launch models or agents. An environment t
 | `resolve` | Moves a `working` papercut to `resolved` and updates the resolution journal. |
 | `block` | Moves a `working` papercut to `blocked`. |
 | `reopen` | Moves a `working`, `blocked`, or `resolved` papercut back to `open`. |
+| `prune` | Previews removal of selected open/resolved records and journal entries; `--apply` deletes them or first saves a verified ZIP. |
+| `consolidate` | Previews a shared summary for selected resolutions; `--apply` rewrites the journal and preserves detailed records. |
 
 `list` shows `open`, `working`, and `blocked` records by default. `list --all` also includes resolved records. Selection is oldest-first using the UTC creation time and then the ID as a deterministic tie-breaker.
 
@@ -197,7 +231,7 @@ The resolved record remains the full audit trail. `PAPERQ_RESOLUTIONS.md` is the
 
 - Messages, resolution notes, and block reasons must be non-empty valid Unicode.
 - Each input is limited to 64 KiB after UTF-8 encoding.
-- NUL characters and the internal history marker are rejected.
+- NUL characters and reserved `<!-- paperq:` markers are rejected.
 - Managed records are capped at 1 MiB to avoid unbounded reads after manual corruption.
 - The managed resolution journal is capped at 16 MiB.
 - Queue state directories and managed files may not be symbolic links or junctions.
@@ -213,6 +247,8 @@ JSON output uses a stable, versioned envelope and stays on stdout, including str
 ```
 
 Successful `resolve --json` responses retain the record fields and add `"resolutionPath":"PAPERQ_RESOLUTIONS.md"`. Successful `show --json` responses add the raw lifecycle `history` text.
+
+Successful `prune --json` and `consolidate --json` responses include `applied`, `ids`, `count`, `beforeBytes`, and `afterBytes`. Pruning adds `mode`, `reason`, and `archivePath` (null for deletion or a preview). Consolidation adds `note`; its `mode` and `archivePath` are null. The byte counts describe UTF-8 journal content, not disk usage or token counts.
 
 | Exit code | Meaning |
 |---:|---|

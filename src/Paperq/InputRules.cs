@@ -22,7 +22,7 @@ internal static class InputRules
             throw PaperqException.InvalidInput($"The {label} cannot contain NUL characters.");
         }
 
-        if (normalized.Contains(RecordCodec.EventsMarker, StringComparison.Ordinal))
+        if (normalized.Contains("<!-- paperq:", StringComparison.Ordinal))
         {
             throw PaperqException.InvalidInput($"The {label} contains a reserved paperq marker.");
         }
